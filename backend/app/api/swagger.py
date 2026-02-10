@@ -132,6 +132,48 @@ SWAGGER_TEMPLATE = {
                 "count": {"type": "integer"},
             },
         },
+        "ConversationHistoryMessage": {
+            "type": "object",
+            "properties": {
+                "role": {"type": "string", "example": "user"},
+                "content": {"type": "string"},
+                "tool_calls": {"type": "object"},
+                "tool_results": {"type": "object"},
+                "context_used": {"type": "object"},
+            },
+        },
+        "ConversationHistoryResponse": {
+            "type": "object",
+            "properties": {
+                "format": {"type": "string", "example": "model"},
+                "items": {
+                    "type": "array",
+                    "items": {"$ref": "#/definitions/ConversationHistoryMessage"},
+                },
+                "count": {"type": "integer"},
+            },
+        },
+        "ConversationTranscriptResponse": {
+            "type": "object",
+            "properties": {
+                "format": {"type": "string", "example": "transcript"},
+                "transcript": {"type": "string"},
+            },
+        },
+        "StreamTestRequest": {
+            "type": "object",
+            "properties": {
+                "message": {"type": "string"},
+                "session_id": {"type": "string", "format": "uuid"},
+            },
+        },
+        "StreamTestResponse": {
+            "type": "object",
+            "properties": {
+                "status": {"type": "string", "example": "sent"},
+                "deliveries": {"type": "integer", "example": 1},
+            },
+        },
     },
 }
 
