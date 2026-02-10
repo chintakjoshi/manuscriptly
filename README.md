@@ -60,6 +60,13 @@ Message history endpoints:
 - `GET /api/v1/sessions/{session_id}/messages` (full stored messages)
 - `GET /api/v1/sessions/{session_id}/history?format=model` (role/content for agent context)
 - `GET /api/v1/sessions/{session_id}/history?format=transcript` (User/Assistant text transcript)
+- `POST /api/v1/agent/chat` (store user message + generate assistant reply via Anthropic)
+
+Anthropic env vars:
+- `ANTHROPIC_API_KEY` (required for AI replies)
+- `ANTHROPIC_MODEL` (default `claude-haiku-4-5-20251001`)
+- `ANTHROPIC_MAX_TOKENS` (default `1024`)
+- `ANTHROPIC_TEMPERATURE` (default `0.4`)
 
 Stop everything:
 

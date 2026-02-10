@@ -6,7 +6,7 @@ SWAGGER_TEMPLATE = {
     "swagger": "2.0",
     "info": {
         "title": "kaka-the-writer API",
-        "description": "Backend API for sessions, plans, messages, and health checks.",
+        "description": "Backend API for sessions, plans, messages, stream, and agent chat.",
         "version": "1.0.0",
     },
     "basePath": "/",
@@ -158,6 +158,22 @@ SWAGGER_TEMPLATE = {
             "properties": {
                 "format": {"type": "string", "example": "transcript"},
                 "transcript": {"type": "string"},
+            },
+        },
+        "AgentChatRequest": {
+            "type": "object",
+            "required": ["conversation_id", "content"],
+            "properties": {
+                "conversation_id": {"type": "string", "format": "uuid"},
+                "content": {"type": "string"},
+            },
+        },
+        "AgentChatResponse": {
+            "type": "object",
+            "properties": {
+                "user_message": {"$ref": "#/definitions/Message"},
+                "assistant_message": {"$ref": "#/definitions/Message"},
+                "model": {"type": "string", "example": "claude-haiku-4-5-20251001"},
             },
         },
         "StreamTestRequest": {
