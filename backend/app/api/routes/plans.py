@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+from uuid import UUID
+
 from flask import Blueprint, jsonify, request
 from pydantic import ValidationError
+from sqlalchemy import select
 
 from app.api.schemas import PlanCreateRequest, PlanUpdateRequest
 from app.api.utils import error_response, to_json_value, validation_error_response
@@ -89,6 +92,70 @@ def create_plan():
         db.commit()
         db.refresh(plan)
         return jsonify(serialize_plan(plan)), 201
+    finally:
+        db.close()
+
+
+@plans_bp.get("")
+def list_plans():
+    """
+    List plans
+    ---
+    tags:
+      - Plans
+    parameters:
+      - in: query
+        name: conversation_id
+        required: false
+        type: string
+        format: uuid
+        description: Optional filter by session/conversation.
+      - in: query
+        name: user_id
+        required: false
+        type: string
+        format: uuid
+        description: Optional filter by user.
+    responses:
+      200:
+        description: Plans list.
+        schema:
+          type: object
+          properties:
+            items:
+              type: array
+              items:
+                $ref: '#/definitions/Plan'
+            count:
+              type: integer
+      400:
+        description: Invalid query parameter.
+        schema:
+          $ref: '#/definitions/ErrorResponse'
+    """
+    conversation_id = request.args.get("conversation_id")
+    user_id = request.args.get("user_id")
+
+    db = SessionLocal()
+    try:
+        query = select(ContentPlan).order_by(ContentPlan.updated_at.desc(), ContentPlan.created_at.desc())
+
+        if conversation_id:
+            try:
+                conversation_uuid = UUID(conversation_id)
+            except ValueError:
+                return error_response("Invalid conversation_id query parameter.", 400)
+            query = query.where(ContentPlan.conversation_id == conversation_uuid)
+
+        if user_id:
+            try:
+                user_uuid = UUID(user_id)
+            except ValueError:
+                return error_response("Invalid user_id query parameter.", 400)
+            query = query.where(ContentPlan.user_id == user_uuid)
+
+        plans = db.execute(query).scalars().all()
+        return jsonify({"items": [serialize_plan(plan) for plan in plans], "count": len(plans)})
     finally:
         db.close()
 
@@ -181,5 +248,47 @@ def update_plan(plan_id):
         db.commit()
         db.refresh(plan)
         return jsonify(serialize_plan(plan))
+    finally:
+        db.close()
+
+
+@plans_bp.delete("/<uuid:plan_id>")
+def delete_plan(plan_id):
+    """
+    Delete plan
+    ---
+    tags:
+      - Plans
+    parameters:
+      - in: path
+        name: plan_id
+        required: true
+        type: string
+        format: uuid
+    responses:
+      200:
+        description: Plan deleted.
+        schema:
+          type: object
+          properties:
+            status:
+              type: string
+              example: deleted
+            id:
+              type: string
+              format: uuid
+      404:
+        description: Plan not found.
+        schema:
+          $ref: '#/definitions/ErrorResponse'
+    """
+    db = SessionLocal()
+    try:
+        plan = db.get(ContentPlan, plan_id)
+        if plan is None:
+            return error_response("Plan not found.", 404)
+        db.delete(plan)
+        db.commit()
+        return jsonify({"status": "deleted", "id": str(plan_id)})
     finally:
         db.close()
