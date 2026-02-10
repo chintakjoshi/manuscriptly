@@ -132,6 +132,20 @@ SWAGGER_TEMPLATE = {
                 "count": {"type": "integer"},
             },
         },
+        "StreamTestRequest": {
+            "type": "object",
+            "properties": {
+                "message": {"type": "string"},
+                "session_id": {"type": "string", "format": "uuid"},
+            },
+        },
+        "StreamTestResponse": {
+            "type": "object",
+            "properties": {
+                "status": {"type": "string", "example": "sent"},
+                "deliveries": {"type": "integer", "example": 1},
+            },
+        },
     },
 }
 

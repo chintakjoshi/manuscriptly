@@ -6,6 +6,7 @@ from sqlalchemy import select
 
 from app.api.schemas import MessageCreateRequest
 from app.api.utils import error_response, to_json_value, validation_error_response
+from app.core.sse import sse_manager
 from app.db.session import SessionLocal
 from app.models import Conversation, Message
 
@@ -78,7 +79,9 @@ def create_message():
         db.add(message)
         db.commit()
         db.refresh(message)
-        return jsonify(serialize_message(message)), 201
+        payload = serialize_message(message)
+        sse_manager.publish("message.created", payload, session_id=str(message.conversation_id))
+        return jsonify(payload), 201
     finally:
         db.close()
 
