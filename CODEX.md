@@ -15,7 +15,7 @@
 - Server-Sent Events (SSE) for live updates
 
 ### Backend
-- FastAPI (Python web framework)
+- Flask (Python web framework)
 - SQLAlchemy/SQLModel (ORM)
 - Alembic (database migrations)
 - Pydantic (data validation)
@@ -48,8 +48,8 @@
 - Create initial migration structure (empty for now)
 
 #### Step 3: Basic Backend Scaffold
-- Install FastAPI, Uvicorn, SQLAlchemy, Pydantic
-- Create main FastAPI application file
+- Install Flask, Uvicorn, SQLAlchemy, Pydantic
+- Create main Flask application file
 - Set up CORS middleware for local development
 - Create basic health check endpoint
 - Test server runs successfully
@@ -84,7 +84,7 @@
 ### Phase 3: Chat Infrastructure
 
 #### Step 7: SSE Setup for Live Updates
-- Implement SSE endpoint in FastAPI for streaming responses
+- Implement SSE endpoint in Flask for streaming responses
 - Create connection manager for handling multiple client connections
 - Set up frontend SSE client utility
 - Test basic message streaming from backend to frontend
@@ -294,7 +294,7 @@
 ### Technical Requirements
 - [ ] Modular React + TypeScript frontend
 - [ ] Relational database (PostgreSQL) for data storage
-- [ ] Modular Flask/FastAPI backend
+- [ ] Modular Flask backend
 - [ ] Message storage with tool call tracking
 - [ ] Live updates via SSE
 - [ ] Solid core functionality based on golden flow

@@ -137,3 +137,23 @@ dist
 # Vite logs files
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Backend build artifacts
+backend/.venv/
+backend/alembic/versions/__pycache__/
+
+# Frontend build artifacts
+frontend/node_modules/
+frontend/dist/
