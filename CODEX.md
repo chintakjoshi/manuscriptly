@@ -25,10 +25,6 @@
 ### Database
 - PostgreSQL (relational database)
 
-### Additional Tools
-- Uvicorn (ASGI server)
-- Python virtual environment
-
 ## Development Phases
 
 ### Phase 1: Foundation Setup
@@ -48,7 +44,7 @@
 - Create initial migration structure (empty for now)
 
 #### Step 3: Basic Backend Scaffold
-- Install Flask, Uvicorn, SQLAlchemy, Pydantic
+- Install Flask, SQLAlchemy, Pydantic
 - Create main Flask application file
 - Set up CORS middleware for local development
 - Create basic health check endpoint
