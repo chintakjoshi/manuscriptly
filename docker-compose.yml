@@ -21,6 +21,8 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     container_name: backend
+    env_file:
+      - ./backend/.env
     environment:
       FLASK_ENV: development
       FLASK_DEBUG: "0"
@@ -42,6 +44,8 @@ services:
       context: ./frontend
       dockerfile: Dockerfile
     container_name: frontend
+    env_file:
+      - ./frontend/.env
     environment:
       VITE_API_BASE_URL: http://localhost:8000
     depends_on:

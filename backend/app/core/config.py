@@ -1,8 +1,10 @@
 import os
+from pathlib import Path
 
 from dotenv import load_dotenv
 
-load_dotenv()
+BACKEND_ROOT = Path(__file__).resolve().parents[2]
+load_dotenv(dotenv_path=BACKEND_ROOT / ".env")
 
 
 class Config:
@@ -19,3 +21,7 @@ class Config:
         "DATABASE_URL",
         "postgresql+psycopg://postgres:postgres@localhost:5432/kaka_writer",
     )
+    ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
+    ANTHROPIC_MODEL = os.getenv("ANTHROPIC_MODEL", "claude-3-5-sonnet-latest")
+    ANTHROPIC_MAX_TOKENS = int(os.getenv("ANTHROPIC_MAX_TOKENS", "1024"))
+    ANTHROPIC_TEMPERATURE = float(os.getenv("ANTHROPIC_TEMPERATURE", "0.4"))

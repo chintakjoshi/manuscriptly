@@ -38,6 +38,9 @@ export function connectLiveStream(
   eventSource.addEventListener("connected", forward("connected"));
   eventSource.addEventListener("test.message", forward("test.message"));
   eventSource.addEventListener("message.created", forward("message.created"));
+  eventSource.addEventListener("agent.response.started", forward("agent.response.started"));
+  eventSource.addEventListener("agent.response.completed", forward("agent.response.completed"));
+  eventSource.addEventListener("agent.response.failed", forward("agent.response.failed"));
   eventSource.onerror = () => {
     onEvent({
       event: "stream.error",

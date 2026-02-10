@@ -54,3 +54,10 @@ class MessageCreateRequest(BaseModel):
     tool_calls: dict[str, Any] | None = None
     tool_results: dict[str, Any] | None = None
     context_used: dict[str, Any] | None = None
+
+
+class AgentChatRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    conversation_id: UUID
+    content: str = Field(min_length=1)
