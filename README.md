@@ -38,6 +38,17 @@ Adminer login values:
 - Password: `postgres`
 - Database: `kaka_writer`
 
+Default superuser (seeded once on first boot when `users` table is empty):
+- user name: `admin`
+- email: `admin@example.com`
+- password: `admin123`
+
+You can override with backend env vars:
+- `SEED_DEFAULT_SUPERUSER`
+- `DEFAULT_SUPERUSER_USER_NAME`
+- `DEFAULT_SUPERUSER_EMAIL`
+- `DEFAULT_SUPERUSER_PASSWORD`
+
 Stop everything:
 
 ```powershell
