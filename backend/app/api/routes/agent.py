@@ -89,8 +89,14 @@ def chat_with_agent():
             session_id=session_id,
         )
 
+        def emit_agent_event(event_name: str, payload: dict) -> None:
+            sse_manager.publish(event_name, payload, session_id=session_id)
+
         try:
-            assistant_text, context_used = ai_service.generate_assistant_reply(body.conversation_id)
+            assistant_text, context_used, tool_calls, tool_results = ai_service.generate_assistant_reply(
+                body.conversation_id,
+                event_callback=emit_agent_event,
+            )
         except ConversationNotFoundError as exc:
             return error_response(str(exc), 404)
         except AIConfigurationError as exc:
@@ -114,6 +120,8 @@ def chat_with_agent():
                     conversation_id=body.conversation_id,
                     role="assistant",
                     content=assistant_text,
+                    tool_calls=tool_calls,
+                    tool_results=tool_results,
                     context_used=context_used,
                 )
             )

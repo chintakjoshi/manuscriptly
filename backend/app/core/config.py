@@ -22,6 +22,7 @@ class Config:
         "postgresql+psycopg://postgres:postgres@localhost:5432/kaka_writer",
     )
     ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
-    ANTHROPIC_MODEL = os.getenv("ANTHROPIC_MODEL", "claude-3-5-sonnet-latest")
+    ANTHROPIC_MODEL = os.getenv("ANTHROPIC_MODEL", "claude-haiku-4-5-20251001")
     ANTHROPIC_MAX_TOKENS = int(os.getenv("ANTHROPIC_MAX_TOKENS", "1024"))
     ANTHROPIC_TEMPERATURE = float(os.getenv("ANTHROPIC_TEMPERATURE", "0.4"))
+    ANTHROPIC_MAX_TOOL_ITERATIONS = int(os.getenv("ANTHROPIC_MAX_TOOL_ITERATIONS", "5"))

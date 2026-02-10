@@ -173,7 +173,7 @@ SWAGGER_TEMPLATE = {
             "properties": {
                 "user_message": {"$ref": "#/definitions/Message"},
                 "assistant_message": {"$ref": "#/definitions/Message"},
-                "model": {"type": "string", "example": "claude-3-5-sonnet-latest"},
+                "model": {"type": "string", "example": "claude-haiku-4-5-20251001"},
             },
         },
         "StreamTestRequest": {

@@ -64,7 +64,7 @@ Message history endpoints:
 
 Anthropic env vars:
 - `ANTHROPIC_API_KEY` (required for AI replies)
-- `ANTHROPIC_MODEL` (default `claude-3-5-sonnet-latest`)
+- `ANTHROPIC_MODEL` (default `claude-haiku-4-5-20251001`)
 - `ANTHROPIC_MAX_TOKENS` (default `1024`)
 - `ANTHROPIC_TEMPERATURE` (default `0.4`)
 
