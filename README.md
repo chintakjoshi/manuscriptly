@@ -56,6 +56,11 @@ SSE quick test:
 3. Or trigger directly:
    `POST http://localhost:8000/api/v1/stream/test` with JSON body `{"message":"hello"}`.
 
+Message history endpoints:
+- `GET /api/v1/sessions/{session_id}/messages` (full stored messages)
+- `GET /api/v1/sessions/{session_id}/history?format=model` (role/content for agent context)
+- `GET /api/v1/sessions/{session_id}/history?format=transcript` (User/Assistant text transcript)
+
 Stop everything:
 
 ```powershell

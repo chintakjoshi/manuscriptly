@@ -2,28 +2,15 @@ from __future__ import annotations
 
 from flask import Blueprint, jsonify, request
 from pydantic import ValidationError
-from sqlalchemy import select
 
 from app.api.schemas import MessageCreateRequest
-from app.api.utils import error_response, to_json_value, validation_error_response
+from app.api.utils import error_response, validation_error_response
 from app.core.sse import sse_manager
 from app.db.session import SessionLocal
-from app.models import Conversation, Message
+from app.services import MessageService, NotFoundError
+from app.services.message_formatters import format_message_for_api
 
 messages_bp = Blueprint("messages", __name__, url_prefix="/api/v1")
-
-
-def serialize_message(message: Message) -> dict:
-    return {
-        "id": to_json_value(message.id),
-        "conversation_id": to_json_value(message.conversation_id),
-        "role": message.role,
-        "content": message.content,
-        "tool_calls": to_json_value(message.tool_calls),
-        "tool_results": to_json_value(message.tool_results),
-        "context_used": to_json_value(message.context_used),
-        "created_at": to_json_value(message.created_at),
-    }
 
 
 @messages_bp.post("/messages")
@@ -64,22 +51,13 @@ def create_message():
 
     db = SessionLocal()
     try:
-        conversation = db.get(Conversation, body.conversation_id)
-        if conversation is None:
-            return error_response("Session not found.", 404)
+        service = MessageService(db)
+        try:
+            message = service.create_message(body)
+        except NotFoundError as exc:
+            return error_response(str(exc), 404)
 
-        message = Message(
-            conversation_id=body.conversation_id,
-            role=body.role,
-            content=body.content,
-            tool_calls=body.tool_calls,
-            tool_results=body.tool_results,
-            context_used=body.context_used,
-        )
-        db.add(message)
-        db.commit()
-        db.refresh(message)
-        payload = serialize_message(message)
+        payload = format_message_for_api(message)
         sse_manager.publish("message.created", payload, session_id=str(message.conversation_id))
         return jsonify(payload), 201
     finally:
@@ -111,21 +89,70 @@ def list_messages_by_session(session_id):
     """
     db = SessionLocal()
     try:
-        session = db.get(Conversation, session_id)
-        if session is None:
-            return error_response("Session not found.", 404)
+        service = MessageService(db)
+        try:
+            messages = service.list_messages_by_session(session_id)
+        except NotFoundError as exc:
+            return error_response(str(exc), 404)
 
-        query = (
-            select(Message)
-            .where(Message.conversation_id == session_id)
-            .order_by(Message.created_at.asc())
-        )
-        messages = db.execute(query).scalars().all()
-        return jsonify(
-            {
-                "items": [serialize_message(message) for message in messages],
-                "count": len(messages),
-            }
-        )
+        return jsonify({"items": [format_message_for_api(message) for message in messages], "count": len(messages)})
+    finally:
+        db.close()
+
+
+@messages_bp.get("/sessions/<uuid:session_id>/history")
+def get_session_history(session_id):
+    """
+    Get conversation history (model format)
+    ---
+    tags:
+      - Messages
+    parameters:
+      - in: path
+        name: session_id
+        required: true
+        type: string
+        format: uuid
+      - in: query
+        name: format
+        required: false
+        type: string
+        enum: [model, transcript]
+        description: model (role/content payload) or transcript (user/assistant text).
+    responses:
+      200:
+        description: Conversation history for model context.
+        schema:
+          $ref: '#/definitions/ConversationHistoryResponse'
+      400:
+        description: Invalid format option.
+        schema:
+          $ref: '#/definitions/ErrorResponse'
+      404:
+        description: Session not found.
+        schema:
+          $ref: '#/definitions/ErrorResponse'
+    """
+    output_format = request.args.get("format", "model")
+
+    db = SessionLocal()
+    try:
+        service = MessageService(db)
+        if output_format == "transcript":
+            try:
+                transcript = service.get_conversation_transcript(session_id)
+            except NotFoundError as exc:
+                return error_response(str(exc), 404)
+            return jsonify({"format": "transcript", "transcript": transcript})
+
+        if output_format != "model":
+            return error_response("Invalid format. Use 'model' or 'transcript'.", 400)
+
+        try:
+            history = service.get_conversation_history(session_id)
+        except NotFoundError as exc:
+            return error_response(str(exc), 404)
+
+        return jsonify({"format": "model", "items": history, "count": len(history)})
     finally:
         db.close()
