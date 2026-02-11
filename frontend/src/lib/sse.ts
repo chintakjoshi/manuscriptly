@@ -41,14 +41,23 @@ export function connectLiveStream(
   eventSource.addEventListener("agent.response.started", forward("agent.response.started"));
   eventSource.addEventListener("agent.response.completed", forward("agent.response.completed"));
   eventSource.addEventListener("agent.response.failed", forward("agent.response.failed"));
+  eventSource.addEventListener("agent.response.retrying", forward("agent.response.retrying"));
   eventSource.addEventListener("agent.tools.detected", forward("agent.tools.detected"));
   eventSource.addEventListener("agent.tool.started", forward("agent.tool.started"));
   eventSource.addEventListener("agent.tool.completed", forward("agent.tool.completed"));
   eventSource.addEventListener("agent.tool.failed", forward("agent.tool.failed"));
-  eventSource.onerror = () => {
+  eventSource.onopen = () => {
     onEvent({
-      event: "stream.error",
-      data: "Connection error",
+      event: "stream.connected",
+      data: { readyState: eventSource.readyState },
+      receivedAt: new Date().toISOString(),
+    });
+  };
+  eventSource.onerror = () => {
+    const reconnecting = eventSource.readyState !== EventSource.CLOSED;
+    onEvent({
+      event: reconnecting ? "stream.reconnecting" : "stream.disconnected",
+      data: { readyState: eventSource.readyState },
       receivedAt: new Date().toISOString(),
     });
   };

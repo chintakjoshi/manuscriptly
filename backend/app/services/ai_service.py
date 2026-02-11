@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import time
 from collections.abc import Callable
 from typing import Any
 from uuid import UUID
@@ -83,18 +84,15 @@ class AIService:
 
         for iteration in range(1, Config.ANTHROPIC_MAX_TOOL_ITERATIONS + 1):
             try:
-                response = self._get_client().messages.create(
-                    model=Config.ANTHROPIC_MODEL,
-                    max_tokens=Config.ANTHROPIC_MAX_TOKENS,
-                    temperature=Config.ANTHROPIC_TEMPERATURE,
-                    system=system_prompt,
-                    messages=conversation_messages,
-                    tools=self.tool_registry.list_anthropic_tools(),
+                response = self._create_completion_with_retry(
+                    system_prompt=system_prompt,
+                    conversation_messages=conversation_messages,
+                    conversation_id=conversation_id,
+                    iteration=iteration,
+                    event_callback=event_callback,
                 )
             except AIConfigurationError:
                 raise
-            except (APIError, APIConnectionError, APITimeoutError) as exc:
-                raise AICompletionError(f"Anthropic completion failed: {exc}") from exc
             except Exception as exc:
                 raise AICompletionError(f"Unexpected AI completion failure: {exc}") from exc
 
@@ -213,6 +211,70 @@ class AIService:
         raise AICompletionError(
             f"Tool execution loop exceeded {Config.ANTHROPIC_MAX_TOOL_ITERATIONS} iterations without final text."
         )
+
+    def _create_completion_with_retry(
+        self,
+        system_prompt: str,
+        conversation_messages: list[dict[str, Any]],
+        conversation_id: UUID,
+        iteration: int,
+        event_callback: Callable[[str, dict[str, Any]], None] | None = None,
+    ) -> Any:
+        max_attempts = max(Config.ANTHROPIC_RETRY_MAX_ATTEMPTS, 1)
+        base_delay = max(Config.ANTHROPIC_RETRY_BASE_DELAY_SECONDS, 0.0)
+        max_delay = max(Config.ANTHROPIC_RETRY_MAX_DELAY_SECONDS, 0.0)
+        last_error: Exception | None = None
+
+        for attempt in range(1, max_attempts + 1):
+            try:
+                return self._get_client().messages.create(
+                    model=Config.ANTHROPIC_MODEL,
+                    max_tokens=Config.ANTHROPIC_MAX_TOKENS,
+                    temperature=Config.ANTHROPIC_TEMPERATURE,
+                    system=system_prompt,
+                    messages=conversation_messages,
+                    tools=self.tool_registry.list_anthropic_tools(),
+                )
+            except AIConfigurationError:
+                raise
+            except (APIError, APIConnectionError, APITimeoutError) as exc:
+                last_error = exc
+                if attempt >= max_attempts or not self._is_retriable_provider_error(exc):
+                    break
+
+                delay_seconds = min(base_delay * (2 ** (attempt - 1)), max_delay) if base_delay > 0 else 0
+                if event_callback:
+                    event_callback(
+                        "agent.response.retrying",
+                        {
+                            "conversation_id": str(conversation_id),
+                            "iteration": iteration,
+                            "attempt": attempt,
+                            "max_attempts": max_attempts,
+                            "retry_in_seconds": round(delay_seconds, 2),
+                            "error": str(exc),
+                        },
+                    )
+                if delay_seconds > 0:
+                    time.sleep(delay_seconds)
+
+        if last_error is not None:
+            raise AICompletionError(
+                "The AI provider is temporarily unavailable. Please try again in a moment."
+            ) from last_error
+        raise AICompletionError("The AI provider did not return a response.")
+
+    @staticmethod
+    def _is_retriable_provider_error(exc: Exception) -> bool:
+        if isinstance(exc, (APIConnectionError, APITimeoutError)):
+            return True
+
+        if isinstance(exc, APIError):
+            status_code = getattr(exc, "status_code", None)
+            if isinstance(status_code, int):
+                return status_code in {408, 409, 425, 429, 500, 502, 503, 504}
+            return True
+        return False
 
     def _normalize_tool_input(
         self,

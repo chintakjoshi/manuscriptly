@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from flask import current_app
 from flask import Blueprint, jsonify, request
 from pydantic import ValidationError
 
@@ -68,6 +69,7 @@ def chat_with_agent():
     try:
         message_service = MessageService(db)
         ai_service = AIService(db)
+        session_id = str(body.conversation_id)
 
         try:
             user_message = message_service.create_message(
@@ -81,7 +83,6 @@ def chat_with_agent():
             return error_response(str(exc), 404)
 
         user_payload = format_message_for_api(user_message)
-        session_id = str(user_message.conversation_id)
         sse_manager.publish("message.created", user_payload, session_id=session_id)
         sse_manager.publish(
             "agent.response.started",
@@ -154,5 +155,17 @@ def chat_with_agent():
             ),
             201,
         )
+    except Exception:
+        db.rollback()
+        current_app.logger.exception("Unexpected error while processing /api/v1/agent/chat")
+        sse_manager.publish(
+            "agent.response.failed",
+            {
+                "conversation_id": str(payload.get("conversation_id")) if isinstance(payload, dict) else None,
+                "error": "Unexpected server error while processing your request.",
+            },
+            session_id=str(payload.get("conversation_id")) if isinstance(payload, dict) else None,
+        )
+        return error_response("Unexpected server error. Please retry.", 500)
     finally:
         db.close()

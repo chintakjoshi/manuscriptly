@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { ChatInput } from "./components/chat/ChatInput";
 import { ChatMessageList } from "./components/chat/ChatMessageList";
+import { LoadingSkeleton } from "./components/common/LoadingSkeleton";
 import {
   ToolActivityIndicator,
   type ToolActivityPhase,
@@ -15,6 +16,7 @@ import { IdeaCard } from "./components/workspace/IdeaCard";
 import { PlanCard } from "./components/workspace/PlanCard";
 import { WorkspaceTabs, type WorkspaceTab } from "./components/workspace/WorkspaceTabs";
 import {
+  ApiRequestError,
   type ContentItemDto,
   type ContentUpdateRequest,
   createSession,
@@ -39,6 +41,17 @@ import { connectLiveStream } from "./lib/sse";
 
 const ACTIVE_SESSION_STORAGE_KEY = "kaka_writer_active_session_id";
 const USER_ID_STORAGE_KEY = "kaka_writer_user_id";
+const TEMP_SESSION_ID_PREFIX = "temp-session-";
+const UUID_V4_LIKE_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+function isTemporarySessionId(sessionId: string): boolean {
+  return sessionId.startsWith(TEMP_SESSION_ID_PREFIX);
+}
+
+function isValidPersistedSessionId(sessionId: string): boolean {
+  return UUID_V4_LIKE_PATTERN.test(sessionId);
+}
 
 function mergeMessages(existing: MessageDto[], incoming: MessageDto[]): MessageDto[] {
   const byId = new Map<string, MessageDto>();
@@ -86,6 +99,9 @@ function asMessageDto(value: unknown): MessageDto | null {
 }
 
 function parseErrorMessage(error: unknown, fallback: string): string {
+  if (error instanceof ApiRequestError) {
+    return error.message;
+  }
   if (error instanceof Error && error.message) {
     return error.message;
   }
@@ -94,7 +110,11 @@ function parseErrorMessage(error: unknown, fallback: string): string {
 
 function pickInitialActiveSessionId(sessions: SessionDto[]): string | null {
   const savedActiveSessionId = localStorage.getItem(ACTIVE_SESSION_STORAGE_KEY);
-  if (savedActiveSessionId && sessions.some((session) => session.id === savedActiveSessionId)) {
+  if (
+    savedActiveSessionId &&
+    isValidPersistedSessionId(savedActiveSessionId) &&
+    sessions.some((session) => session.id === savedActiveSessionId)
+  ) {
     return savedActiveSessionId;
   }
   return sessions[0]?.id ?? null;
@@ -152,6 +172,38 @@ function buildExecutePlanRequestMessage(
   return lines.join("\n");
 }
 
+function upsertPlanById(plans: PlanDto[], nextPlan: PlanDto): PlanDto[] {
+  let found = false;
+  const next = plans.map((plan) => {
+    if (plan.id !== nextPlan.id) {
+      return plan;
+    }
+    found = true;
+    return nextPlan;
+  });
+  return found ? next : [nextPlan, ...next];
+}
+
+function reinsertPlanAtIndex(list: PlanDto[], plan: PlanDto, index: number): PlanDto[] {
+  if (list.some((item) => item.id === plan.id)) {
+    return list;
+  }
+  if (index < 0) {
+    return [plan, ...list];
+  }
+  const safeIndex = Math.min(index, list.length);
+  const next = [...list];
+  next.splice(safeIndex, 0, plan);
+  return next;
+}
+
+function countWords(value: string): number {
+  return value
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean).length;
+}
+
 export default function App() {
   const [sessions, setSessions] = useState<SessionDto[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
@@ -163,7 +215,11 @@ export default function App() {
   const [contentItems, setContentItems] = useState<ContentItemDto[]>([]);
   const [selectedContentId, setSelectedContentId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<WorkspaceTab>("plan");
-  const [streamStatus, setStreamStatus] = useState<"connecting" | "connected" | "error">("connecting");
+  const [streamStatus, setStreamStatus] = useState<"connecting" | "connected" | "reconnecting" | "disconnected">(
+    "connecting",
+  );
+  const [streamNotice, setStreamNotice] = useState<string | null>(null);
+  const needsStreamResyncRef = useRef(false);
   const [agentState, setAgentState] = useState("Idle");
   const [toolActivityPhase, setToolActivityPhase] = useState<ToolActivityPhase>("idle");
   const [toolRuns, setToolRuns] = useState<ToolRun[]>([]);
@@ -218,6 +274,11 @@ export default function App() {
   }, [agentState, toolActivityPhase, toolRuns]);
 
   const refreshPlans = async (sessionId: string, showLoading = false) => {
+    if (!isValidPersistedSessionId(sessionId)) {
+      setPlans([]);
+      setLoadingPlans(false);
+      return;
+    }
     if (showLoading) {
       setLoadingPlans(true);
     }
@@ -254,9 +315,10 @@ export default function App() {
   };
 
   const refreshContentItems = async (sessionId: string, showLoading = false) => {
-    if (!sessionId) {
+    if (!sessionId || !isValidPersistedSessionId(sessionId)) {
       setContentItems([]);
       setSelectedContentId(null);
+      setLoadingContentItems(false);
       return;
     }
     if (showLoading) {
@@ -275,6 +337,55 @@ export default function App() {
       setErrorMessage(parseErrorMessage(error, "Failed to load content drafts."));
     } finally {
       if (showLoading) {
+        setLoadingContentItems(false);
+      }
+    }
+  };
+
+  const loadSessionArtifacts = async (sessionId: string, showLoading = false) => {
+    if (!sessionId || !isValidPersistedSessionId(sessionId)) {
+      setMessages([]);
+      setPlans([]);
+      setContentItems([]);
+      setSelectedContentId(null);
+      setLoadingMessages(false);
+      setLoadingPlans(false);
+      setLoadingContentItems(false);
+      return;
+    }
+
+    if (showLoading) {
+      setLoadingMessages(true);
+      setLoadingPlans(true);
+      setLoadingContentItems(true);
+    }
+
+    try {
+      const [messageResponse, planResponse, contentResponse] = await Promise.all([
+        listSessionMessages(sessionId),
+        listPlans({ conversationId: sessionId }),
+        listContentItems({ conversationId: sessionId }),
+      ]);
+
+      setMessages(messageResponse.items);
+      setPlans(planResponse.items);
+      setContentItems(contentResponse.items);
+      setSelectedContentId((current) => {
+        if (current && contentResponse.items.some((item) => item.id === current)) {
+          return current;
+        }
+        return contentResponse.items[0]?.id ?? null;
+      });
+    } catch (error) {
+      setMessages([]);
+      setPlans([]);
+      setContentItems([]);
+      setSelectedContentId(null);
+      setErrorMessage(parseErrorMessage(error, "Failed to load workspace data."));
+    } finally {
+      if (showLoading) {
+        setLoadingMessages(false);
+        setLoadingPlans(false);
         setLoadingContentItems(false);
       }
     }
@@ -398,7 +509,7 @@ export default function App() {
   }, [userContext?.id]);
 
   useEffect(() => {
-    if (!activeSessionId) {
+    if (!activeSessionId || !isValidPersistedSessionId(activeSessionId)) {
       localStorage.removeItem(ACTIVE_SESSION_STORAGE_KEY);
       return;
     }
@@ -406,8 +517,7 @@ export default function App() {
   }, [activeSessionId]);
 
   useEffect(() => {
-    let isMounted = true;
-    if (!activeSessionId) {
+    if (!activeSessionId || !isValidPersistedSessionId(activeSessionId)) {
       setMessages([]);
       setPlans([]);
       setContentItems([]);
@@ -422,68 +532,53 @@ export default function App() {
       setLoadingMessages(false);
       setLoadingPlans(false);
       setLoadingContentItems(false);
-      return () => {
-        isMounted = false;
-      };
+      return;
     }
 
-    const loadArtifacts = async () => {
-      setToolRuns([]);
-      setExpectedToolCount(0);
-      setToolActivityPhase("idle");
-      setAgentState("Idle");
-      setLoadingMessages(true);
-      setLoadingPlans(true);
-      setLoadingContentItems(true);
-      try {
-        const [messageResponse, planResponse, contentResponse] = await Promise.all([
-          listSessionMessages(activeSessionId),
-          listPlans({ conversationId: activeSessionId }),
-          listContentItems({ conversationId: activeSessionId }),
-        ]);
-        if (!isMounted) {
-          return;
-        }
-        setMessages(messageResponse.items);
-        setPlans(planResponse.items);
-        setContentItems(contentResponse.items);
-        setSelectedContentId(contentResponse.items[0]?.id ?? null);
-      } catch (error) {
-        if (!isMounted) {
-          return;
-        }
-        setMessages([]);
-        setPlans([]);
-        setContentItems([]);
-        setSelectedContentId(null);
-        setErrorMessage(parseErrorMessage(error, "Failed to load workspace data."));
-      } finally {
-        if (isMounted) {
-          setLoadingMessages(false);
-          setLoadingPlans(false);
-          setLoadingContentItems(false);
-        }
-      }
-    };
-
-    void loadArtifacts();
-    return () => {
-      isMounted = false;
-    };
+    setToolRuns([]);
+    setExpectedToolCount(0);
+    setToolActivityPhase("idle");
+    setAgentState("Idle");
+    void loadSessionArtifacts(activeSessionId, true);
   }, [activeSessionId]);
 
   useEffect(() => {
-    if (!activeSessionId) {
+    if (!activeSessionId || !isValidPersistedSessionId(activeSessionId)) {
+      setStreamStatus("disconnected");
+      setStreamNotice(activeSessionId && isTemporarySessionId(activeSessionId) ? "Creating session..." : null);
+      needsStreamResyncRef.current = false;
       return;
     }
     setStreamStatus("connecting");
+    setStreamNotice("Connecting live updates...");
 
-    const { eventSource, disconnect } = connectLiveStream((incomingEvent) => {
-      if (incomingEvent.event === "stream.error") {
-        setStreamStatus("error");
+    const { disconnect } = connectLiveStream((incomingEvent) => {
+      if (incomingEvent.event === "stream.connected" || incomingEvent.event === "connected") {
+        setStreamStatus("connected");
+        setStreamNotice(null);
+        if (needsStreamResyncRef.current) {
+          needsStreamResyncRef.current = false;
+          void loadSessionArtifacts(activeSessionId);
+          if (userContext?.id) {
+            void refreshIdeaPlans(userContext.id);
+          }
+        }
         return;
       }
-      setStreamStatus("connected");
+
+      if (incomingEvent.event === "stream.reconnecting") {
+        setStreamStatus("reconnecting");
+        setStreamNotice("Live updates interrupted. Reconnecting...");
+        needsStreamResyncRef.current = true;
+        return;
+      }
+
+      if (incomingEvent.event === "stream.disconnected") {
+        setStreamStatus("disconnected");
+        setStreamNotice("Live updates are disconnected. The app will keep trying to reconnect.");
+        needsStreamResyncRef.current = true;
+        return;
+      }
 
       if (incomingEvent.event === "message.created") {
         const incomingMessage = asMessageDto(incomingEvent.data);
@@ -592,6 +687,15 @@ export default function App() {
         return;
       }
 
+      if (incomingEvent.event === "agent.response.retrying") {
+        const data = asRecord(incomingEvent.data);
+        const attempt = typeof data?.attempt === "number" ? data.attempt : 1;
+        const maxAttempts = typeof data?.max_attempts === "number" ? data.max_attempts : attempt;
+        setToolActivityPhase("thinking");
+        setAgentState(`Retrying AI call (${attempt + 1}/${maxAttempts})...`);
+        return;
+      }
+
       if (incomingEvent.event === "agent.response.failed") {
         const data = asRecord(incomingEvent.data);
         const eventError = typeof data?.error === "string" ? data.error : "Agent request failed.";
@@ -603,7 +707,6 @@ export default function App() {
       }
     }, activeSessionId);
 
-    eventSource.onopen = () => setStreamStatus("connected");
     return () => disconnect();
   }, [activeSessionId, userContext?.id]);
 
@@ -645,16 +748,32 @@ export default function App() {
 
     setErrorMessage(null);
     setIsCreatingSession(true);
+    const previousActiveSessionId = activeSessionId;
+    const tempSessionId = `temp-session-${Date.now()}`;
+    const optimisticSession: SessionDto = {
+      id: tempSessionId,
+      user_id: trimmedUserId,
+      title: title || null,
+      status: "active",
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
     try {
+      setSessions((previous) => [optimisticSession, ...previous]);
+      setActiveTab("plan");
+
       const session = await createSession({
         user_id: trimmedUserId,
         title: title || null,
         status: "active",
       });
-      setSessions((previous) => [session, ...previous.filter((item) => item.id !== session.id)]);
+      setSessions((previous) =>
+        [session, ...previous.filter((item) => item.id !== session.id && item.id !== tempSessionId)],
+      );
       setActiveSessionId(session.id);
-      setActiveTab("plan");
     } catch (error) {
+      setSessions((previous) => previous.filter((item) => item.id !== tempSessionId));
+      setActiveSessionId((current) => (current === tempSessionId ? previousActiveSessionId : current));
       setErrorMessage(parseErrorMessage(error, "Failed to create session."));
     } finally {
       setIsCreatingSession(false);
@@ -662,7 +781,8 @@ export default function App() {
   };
 
   const sendMessageToAgent = async (content: string, options?: { switchToContentOnSuccess?: boolean }) => {
-    if (!activeSessionId) {
+    if (!activeSessionId || !isValidPersistedSessionId(activeSessionId)) {
+      setErrorMessage("Session is still being created. Please wait a moment and retry.");
       return;
     }
 
@@ -740,10 +860,35 @@ export default function App() {
   };
 
   const handleSaveContent = async (contentItemId: string, payload: ContentUpdateRequest) => {
+    const existingItem = contentItems.find((item) => item.id === contentItemId);
+    if (!existingItem) {
+      throw new Error("Content item no longer exists.");
+    }
+
+    const optimisticTitle = payload.title ?? existingItem.title;
+    const optimisticContent = payload.content ?? existingItem.content;
+    const contentChanged = payload.content !== undefined && payload.content !== existingItem.content;
+    const titleChanged = payload.title !== undefined && payload.title !== existingItem.title;
+    const optimisticItem: ContentItemDto = {
+      ...existingItem,
+      title: optimisticTitle,
+      content: optimisticContent,
+      meta_description: payload.meta_description !== undefined ? payload.meta_description : existingItem.meta_description,
+      tags: payload.tags !== undefined ? payload.tags : existingItem.tags,
+      status: payload.status ?? existingItem.status,
+      word_count: contentChanged ? countWords(optimisticContent) : existingItem.word_count,
+      version: contentChanged || titleChanged ? existingItem.version + 1 : existingItem.version,
+      updated_at: new Date().toISOString(),
+    };
+
     setSavingContentId(contentItemId);
     try {
+      setContentItems((previous) => previous.map((item) => (item.id === contentItemId ? optimisticItem : item)));
       const updated = await updateContentItem(contentItemId, payload);
       setContentItems((previous) => previous.map((item) => (item.id === updated.id ? updated : item)));
+    } catch (error) {
+      setContentItems((previous) => previous.map((item) => (item.id === contentItemId ? existingItem : item)));
+      throw error;
     } finally {
       setSavingContentId((current) => (current === contentItemId ? null : current));
     }
@@ -771,22 +916,58 @@ export default function App() {
   };
 
   const handleSavePlan = async (planId: string, payload: PlanUpdateRequest) => {
+    const existingPlan = plans.find((plan) => plan.id === planId) ?? ideaPlans.find((plan) => plan.id === planId);
+    if (!existingPlan) {
+      throw new Error("Plan no longer exists.");
+    }
+
+    const optimisticPlan: PlanDto = {
+      ...existingPlan,
+      title: payload.title ?? existingPlan.title,
+      description: payload.description !== undefined ? payload.description : existingPlan.description,
+      target_keywords: payload.target_keywords !== undefined ? payload.target_keywords : existingPlan.target_keywords,
+      outline: payload.outline ?? existingPlan.outline,
+      research_notes: payload.research_notes !== undefined ? payload.research_notes : existingPlan.research_notes,
+      status: payload.status ?? existingPlan.status,
+      updated_at: new Date().toISOString(),
+    };
+
     setSavingPlanId(planId);
     try {
+      setPlans((previous) => upsertPlanById(previous, optimisticPlan));
+      setIdeaPlans((previous) => upsertPlanById(previous, optimisticPlan));
+
       const updated = await updatePlan(planId, payload);
-      setPlans((previous) => previous.map((plan) => (plan.id === updated.id ? updated : plan)));
-      setIdeaPlans((previous) => previous.map((plan) => (plan.id === updated.id ? updated : plan)));
+      setPlans((previous) => upsertPlanById(previous, updated));
+      setIdeaPlans((previous) => upsertPlanById(previous, updated));
+    } catch (error) {
+      setPlans((previous) => upsertPlanById(previous, existingPlan));
+      setIdeaPlans((previous) => upsertPlanById(previous, existingPlan));
+      throw error;
     } finally {
       setSavingPlanId(null);
     }
   };
 
   const handleDeletePlan = async (planId: string) => {
+    const planIndex = plans.findIndex((plan) => plan.id === planId);
+    const planToRestore = planIndex >= 0 ? plans[planIndex] : null;
+    const ideaIndex = ideaPlans.findIndex((plan) => plan.id === planId);
+    const ideaPlanToRestore = ideaIndex >= 0 ? ideaPlans[ideaIndex] : planToRestore;
+
     setDeletingPlanId(planId);
     try {
-      await deletePlan(planId);
       setPlans((previous) => previous.filter((plan) => plan.id !== planId));
       setIdeaPlans((previous) => previous.filter((plan) => plan.id !== planId));
+      await deletePlan(planId);
+    } catch (error) {
+      if (planToRestore) {
+        setPlans((previous) => reinsertPlanAtIndex(previous, planToRestore, planIndex));
+      }
+      if (ideaPlanToRestore) {
+        setIdeaPlans((previous) => reinsertPlanAtIndex(previous, ideaPlanToRestore, ideaIndex));
+      }
+      throw error;
     } finally {
       setDeletingPlanId(null);
     }
@@ -822,16 +1003,28 @@ export default function App() {
   };
 
   const handleOpenSessionFromIdea = (sessionId: string) => {
+    if (!isValidPersistedSessionId(sessionId)) {
+      return;
+    }
     setActiveSessionId(sessionId);
     setActiveTab("plan");
+  };
+
+  const handleSelectSession = (sessionId: string) => {
+    if (!isValidPersistedSessionId(sessionId)) {
+      return;
+    }
+    setActiveSessionId(sessionId);
   };
 
   const streamBadgeClasses =
     streamStatus === "connected"
       ? "bg-emerald-100 text-emerald-700"
-      : streamStatus === "error"
-        ? "bg-rose-100 text-rose-700"
-        : "bg-amber-100 text-amber-700";
+      : streamStatus === "reconnecting"
+        ? "bg-amber-100 text-amber-700"
+        : streamStatus === "disconnected"
+          ? "bg-rose-100 text-rose-700"
+          : "bg-slate-200 text-slate-700";
 
   return (
     <main className="min-h-screen bg-slate-50 text-slate-900">
@@ -845,6 +1038,7 @@ export default function App() {
           <div className="mt-3 flex flex-wrap gap-2">
             <span className={`rounded-md px-2 py-1 text-xs font-medium ${streamBadgeClasses}`}>{streamStatus}</span>
           </div>
+          {streamNotice ? <p className="mt-2 text-xs text-slate-600">{streamNotice}</p> : null}
 
           <div className="mt-3 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600">
             <div className="flex items-center justify-between gap-2">
@@ -867,11 +1061,16 @@ export default function App() {
 
           <div className="mt-3 max-h-[52vh] overflow-y-auto pr-1">
             {loadingSessions ? (
-              <div className="rounded-xl border border-slate-200 bg-white px-3 py-5 text-xs text-slate-500">
-                Loading sessions...
+              <div className="space-y-2 rounded-xl border border-slate-200 bg-white p-3">
+                {Array.from({ length: 4 }).map((_, index) => (
+                  <div key={`session-skeleton-${index}`} className="rounded-lg border border-slate-100 bg-slate-50 p-2">
+                    <LoadingSkeleton className="h-3 w-3/4" />
+                    <LoadingSkeleton className="mt-2 h-2.5 w-1/2" />
+                  </div>
+                ))}
               </div>
             ) : (
-              <SessionList sessions={sessions} activeSessionId={activeSessionId} onSelectSession={setActiveSessionId} />
+              <SessionList sessions={sessions} activeSessionId={activeSessionId} onSelectSession={handleSelectSession} />
             )}
           </div>
 
@@ -899,8 +1098,23 @@ export default function App() {
               No active session. Create one from the left sidebar.
             </div>
           ) : loadingMessages ? (
-            <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 px-4 py-8 text-sm text-slate-500">
-              Loading messages...
+            <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-4">
+              <div className="space-y-3">
+                <div className="max-w-[78%] rounded-xl border border-slate-200 bg-white p-3">
+                  <LoadingSkeleton className="h-2.5 w-20" />
+                  <LoadingSkeleton className="mt-2 h-3 w-full" />
+                  <LoadingSkeleton className="mt-2 h-3 w-5/6" />
+                </div>
+                <div className="ml-auto max-w-[78%] rounded-xl border border-slate-200 bg-white p-3">
+                  <LoadingSkeleton className="h-2.5 w-16" />
+                  <LoadingSkeleton className="mt-2 h-3 w-full" />
+                  <LoadingSkeleton className="mt-2 h-3 w-4/5" />
+                </div>
+                <div className="max-w-[78%] rounded-xl border border-slate-200 bg-white p-3">
+                  <LoadingSkeleton className="h-2.5 w-20" />
+                  <LoadingSkeleton className="mt-2 h-3 w-11/12" />
+                </div>
+              </div>
             </div>
           ) : (
             <div className="mt-4 grid grid-cols-1 gap-4 xl:grid-cols-[1fr_360px]">
@@ -929,8 +1143,20 @@ export default function App() {
                         <span className="text-[11px] text-slate-500">{ideaPlans.length} idea{ideaPlans.length === 1 ? "" : "s"}</span>
                       </div>
                       {loadingIdeaPlans ? (
-                        <div className="rounded-xl border border-slate-200 bg-white px-3 py-6 text-sm text-slate-500">
-                          Loading blog ideas...
+                        <div className="space-y-3 rounded-xl border border-slate-200 bg-white p-3">
+                          {Array.from({ length: 2 }).map((_, index) => (
+                            <div key={`idea-skeleton-${index}`} className="rounded-xl border border-slate-100 bg-slate-50 p-3">
+                              <LoadingSkeleton className="h-3 w-28" />
+                              <LoadingSkeleton className="mt-2 h-4 w-5/6" />
+                              <LoadingSkeleton className="mt-2 h-3 w-full" />
+                              <LoadingSkeleton className="mt-1.5 h-3 w-4/5" />
+                              <div className="mt-3 flex gap-1">
+                                <LoadingSkeleton className="h-5 w-14 rounded-full" />
+                                <LoadingSkeleton className="h-5 w-16 rounded-full" />
+                                <LoadingSkeleton className="h-5 w-12 rounded-full" />
+                              </div>
+                            </div>
+                          ))}
                         </div>
                       ) : ideaPlans.length === 0 ? (
                         <div className="rounded-xl border border-dashed border-slate-300 bg-white px-3 py-6 text-sm text-slate-500">
@@ -959,8 +1185,25 @@ export default function App() {
                         <span className="text-[11px] text-slate-500">{plans.length} in this session</span>
                       </div>
                       {loadingPlans ? (
-                        <div className="rounded-xl border border-slate-200 bg-white px-3 py-6 text-sm text-slate-500">
-                          Loading plans...
+                        <div className="space-y-3 rounded-xl border border-slate-200 bg-white p-3">
+                          {Array.from({ length: 2 }).map((_, index) => (
+                            <div key={`plan-skeleton-${index}`} className="rounded-xl border border-slate-100 bg-slate-50 p-3">
+                              <div className="flex items-start justify-between">
+                                <div className="w-full pr-2">
+                                  <LoadingSkeleton className="h-3 w-16" />
+                                  <LoadingSkeleton className="mt-2 h-4 w-4/5" />
+                                </div>
+                                <LoadingSkeleton className="h-5 w-16" />
+                              </div>
+                              <LoadingSkeleton className="mt-3 h-3 w-full" />
+                              <LoadingSkeleton className="mt-1.5 h-3 w-5/6" />
+                              <div className="mt-3 flex gap-2">
+                                <LoadingSkeleton className="h-6 w-16" />
+                                <LoadingSkeleton className="h-6 w-20" />
+                                <LoadingSkeleton className="h-6 w-14" />
+                              </div>
+                            </div>
+                          ))}
                         </div>
                       ) : plans.length === 0 ? (
                         <div className="rounded-xl border border-dashed border-slate-300 bg-white px-3 py-6 text-sm text-slate-500">
@@ -985,8 +1228,16 @@ export default function App() {
                 ) : (
                   <div className="mt-3">
                     {loadingContentItems ? (
-                      <div className="rounded-xl border border-slate-200 bg-white px-3 py-6 text-sm text-slate-500">
-                        Loading content drafts...
+                      <div className="space-y-3 rounded-xl border border-slate-200 bg-white p-3">
+                        <LoadingSkeleton className="h-3 w-16" />
+                        <div className="flex gap-2">
+                          <LoadingSkeleton className="h-12 w-44" />
+                          <LoadingSkeleton className="h-12 w-44" />
+                        </div>
+                        <LoadingSkeleton className="h-8 w-full" />
+                        <LoadingSkeleton className="h-24 w-full" />
+                        <LoadingSkeleton className="h-24 w-full" />
+                        <LoadingSkeleton className="h-24 w-full" />
                       </div>
                     ) : (
                       <ContentDisplay

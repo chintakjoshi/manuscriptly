@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { FormEvent } from "react";
+import type { FormEvent, KeyboardEvent } from "react";
 
 type ChatInputProps = {
   onSend: (content: string) => Promise<void>;
@@ -10,15 +10,33 @@ type ChatInputProps = {
 export function ChatInput({ onSend, disabled = false, loading = false }: ChatInputProps) {
   const [value, setValue] = useState("");
 
-  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
+  const submitCurrentValue = async () => {
     const trimmed = value.trim();
     if (!trimmed || disabled || loading) {
       return;
     }
-
     setValue("");
     await onSend(trimmed);
+  };
+
+  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    await submitCurrentValue();
+  };
+
+  const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (event.nativeEvent.isComposing) {
+      return;
+    }
+
+    const isEnter = event.key === "Enter";
+    const wantsNewLine = event.shiftKey;
+    if (!isEnter || wantsNewLine) {
+      return;
+    }
+
+    event.preventDefault();
+    void submitCurrentValue();
   };
 
   return (
@@ -31,6 +49,7 @@ export function ChatInput({ onSend, disabled = false, loading = false }: ChatInp
           id="chat-input"
           value={value}
           onChange={(event) => setValue(event.target.value)}
+          onKeyDown={handleKeyDown}
           placeholder="Describe the content you want to create..."
           disabled={disabled || loading}
           rows={3}
@@ -44,7 +63,7 @@ export function ChatInput({ onSend, disabled = false, loading = false }: ChatInp
           {loading ? "Sending..." : "Send"}
         </button>
       </div>
-      <p className="mt-2 text-xs text-slate-500">Press Enter for newline. Click Send to submit.</p>
+      <p className="mt-2 text-xs text-slate-500">Press Enter to send. Use Shift+Enter for newline.</p>
     </form>
   );
 }
