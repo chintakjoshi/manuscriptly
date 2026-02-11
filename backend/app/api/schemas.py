@@ -72,6 +72,32 @@ class PlanUpdateRequest(BaseModel):
         return self
 
 
+class StartSessionFromPlanRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    title: str | None = Field(default=None, max_length=500)
+    status: str = Field(default="active", max_length=50)
+
+
+class ContentUpdateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    title: str | None = Field(default=None, min_length=1, max_length=500)
+    content: str | None = Field(default=None, min_length=1)
+    meta_description: str | None = Field(default=None, max_length=500)
+    tags: list[str] | None = None
+    status: str | None = Field(default=None, max_length=50)
+    change_description: str | None = None
+
+    @model_validator(mode="after")
+    def validate_non_empty_update(self) -> "ContentUpdateRequest":
+        payload = self.model_dump()
+        payload.pop("change_description", None)
+        if all(value is None for value in payload.values()):
+            raise ValueError("At least one content field is required for update.")
+        return self
+
+
 class MessageCreateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
