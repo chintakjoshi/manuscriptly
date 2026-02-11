@@ -53,7 +53,17 @@ class DummyToolInput(BaseModel):
     topic: str
 
 
-class AIStep12LoopTests(unittest.TestCase):
+class ConversationBoundToolInput(BaseModel):
+    conversation_id: str
+    topic: str
+
+
+class CreateIdeaToolInput(BaseModel):
+    conversation_id: str
+    user_request: str
+
+
+class AIToolLoopTests(unittest.TestCase):
     def _make_service(self, responses: list[FakeResponse], registry: ToolRegistry) -> AIService:
         conversation = SimpleNamespace(id=uuid4(), user_id=uuid4())
         service = AIService(FakeDB(conversation))
@@ -62,7 +72,44 @@ class AIStep12LoopTests(unittest.TestCase):
         service.tool_router = ToolExecutionRouter(registry=registry)
         service._build_anthropic_history = lambda conversation_id: [{"role": "user", "content": "Help me"}]
         service._build_user_context = lambda user_id: {"user_name": "Tester"}
+        service._build_agent_memory = lambda conversation_id, user_id, user_context: {
+            "known_profile_fields": [],
+            "inferred_facts": [],
+            "current_session_intents": [],
+            "cross_session_intents": [],
+            "recent_plan_memory": [],
+        }
         return service
+
+    def test_build_system_prompt_contains_memory_guardrails(self) -> None:
+        prompt = AIService._build_system_prompt(
+            {
+                "user_name": "Avery",
+                "company_name": "Acme Labs",
+                "industry": "SaaS",
+                "target_audience": "Founders",
+                "brand_voice": "Practical",
+                "content_preferences": None,
+                "additional_context": "Launching a new product.",
+            },
+            {
+                "known_profile_fields": [
+                    {"field": "company_name", "label": "Company Name", "value": "Acme Labs"},
+                ],
+                "inferred_facts": [
+                    {"fact": "topic_focus", "label": "Topic Focus", "value": "PLG onboarding"},
+                ],
+                "current_session_intents": ["Need a launch post outline"],
+                "cross_session_intents": ["Prior request about onboarding strategy"],
+                "recent_plan_memory": [{"title": "PLG onboarding checklist", "keywords": ["PLG", "onboarding"]}],
+            },
+        )
+
+        self.assertIn("Agent Memory Snapshot", prompt)
+        self.assertIn("Memory Guardrails", prompt)
+        self.assertIn("Do not ask again for details that are already known", prompt)
+        self.assertIn("Acme Labs", prompt)
+        self.assertIn("Need a launch post outline", prompt)
 
     def test_generate_reply_executes_tool_and_returns_final_text(self) -> None:
         registry = ToolRegistry()
@@ -120,6 +167,70 @@ class AIStep12LoopTests(unittest.TestCase):
         self.assertEqual(text, "I could not run that tool, but here is guidance.")
         self.assertEqual(tool_results["items"][0]["status"], "failed")
         self.assertIn("agent.tool.failed", events)
+
+    def test_generate_reply_injects_conversation_id_for_tool_payload(self) -> None:
+        registry = ToolRegistry()
+        registry.register(
+            ToolDefinition(
+                name="conversation_bound_tool",
+                description="Needs conversation id",
+                input_model=ConversationBoundToolInput,
+                handler=lambda payload: {
+                    "conversation_id": payload.conversation_id,
+                    "topic": payload.topic,
+                },
+            )
+        )
+        wrong_conversation_id = str(uuid4())
+        responses = [
+            FakeResponse(
+                [
+                    FakeBlock(
+                        "tool_use",
+                        id="toolu_1",
+                        name="conversation_bound_tool",
+                        input={"conversation_id": wrong_conversation_id, "topic": "future of ai"},
+                    ),
+                ]
+            ),
+            FakeResponse([FakeBlock("text", text="Done")]),
+        ]
+        service = self._make_service(responses, registry)
+        run_conversation_id = uuid4()
+        _, _, tool_calls, tool_results = service.generate_assistant_reply(run_conversation_id)
+
+        self.assertEqual(tool_calls["items"][0]["input"]["conversation_id"], str(run_conversation_id))
+        self.assertEqual(tool_results["items"][0]["result"]["conversation_id"], str(run_conversation_id))
+
+    def test_generate_reply_normalizes_create_content_idea_user_request(self) -> None:
+        registry = ToolRegistry()
+        registry.register(
+            ToolDefinition(
+                name="create_content_idea",
+                description="Create content idea",
+                input_model=CreateIdeaToolInput,
+                handler=lambda payload: {"user_request": payload.user_request},
+            )
+        )
+        responses = [
+            FakeResponse(
+                [
+                    FakeBlock(
+                        "tool_use",
+                        id="toolu_1",
+                        name="create_content_idea",
+                        input={"topic": "future of AI"},
+                    ),
+                ]
+            ),
+            FakeResponse([FakeBlock("text", text="Done")]),
+        ]
+        service = self._make_service(responses, registry)
+        _, _, tool_calls, tool_results = service.generate_assistant_reply(uuid4())
+
+        self.assertIn("user_request", tool_calls["items"][0]["input"])
+        self.assertIn("future of AI", tool_calls["items"][0]["input"]["user_request"])
+        self.assertIn("future of AI", tool_results["items"][0]["result"]["user_request"])
 
 
 if __name__ == "__main__":

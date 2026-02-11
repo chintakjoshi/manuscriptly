@@ -14,12 +14,6 @@ SWAGGER_TEMPLATE = {
     "consumes": ["application/json"],
     "produces": ["application/json"],
     "definitions": {
-        "HealthResponse": {
-            "type": "object",
-            "properties": {
-                "status": {"type": "string", "example": "ok"},
-            },
-        },
         "ErrorResponse": {
             "type": "object",
             "properties": {

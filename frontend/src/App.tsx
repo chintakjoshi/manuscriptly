@@ -17,7 +17,6 @@ import {
   createSession,
   getUserContext,
   deletePlan,
-  getHealth,
   listPlans,
   listSessionMessages,
   listSessions,
@@ -34,11 +33,6 @@ import { connectLiveStream } from "./lib/sse";
 
 const ACTIVE_SESSION_STORAGE_KEY = "kaka_writer_active_session_id";
 const USER_ID_STORAGE_KEY = "kaka_writer_user_id";
-
-type HealthState = {
-  status: "idle" | "loading" | "ok" | "error";
-  message: string;
-};
 
 function mergeMessages(existing: MessageDto[], incoming: MessageDto[]): MessageDto[] {
   const byId = new Map<string, MessageDto>();
@@ -160,10 +154,6 @@ function extractLatestGeneratedContent(messages: MessageDto[]): GeneratedContent
 }
 
 export default function App() {
-  const [health, setHealth] = useState<HealthState>({
-    status: "idle",
-    message: "Waiting to check backend health...",
-  });
   const [sessions, setSessions] = useState<SessionDto[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [userId, setUserId] = useState("");
@@ -235,33 +225,6 @@ export default function App() {
     const bootstrap = async () => {
       setLoadingSessions(true);
       setErrorMessage(null);
-      setHealth({ status: "loading", message: "Checking backend health..." });
-
-      try {
-        const healthResponse = await getHealth();
-        if (!isMounted) {
-          return;
-        }
-        setHealth({
-          status: healthResponse.status === "ok" ? "ok" : "error",
-          message:
-            healthResponse.status === "ok"
-              ? "Backend health check passed."
-              : "Backend returned an unexpected health response.",
-        });
-      } catch (error) {
-        if (!isMounted) {
-          return;
-        }
-        setHealth({
-          status: "error",
-          message: "Backend health check failed. Start backend at http://localhost:8000.",
-        });
-        setErrorMessage(parseErrorMessage(error, "Could not connect to backend."));
-        setLoadingSessions(false);
-        return;
-      }
-
       try {
         const savedUserId = localStorage.getItem(USER_ID_STORAGE_KEY) ?? "";
 
@@ -663,13 +626,6 @@ export default function App() {
     }
   };
 
-  const healthBadgeClasses =
-    health.status === "ok"
-      ? "bg-emerald-100 text-emerald-700"
-      : health.status === "error"
-        ? "bg-rose-100 text-rose-700"
-        : "bg-amber-100 text-amber-700";
-
   const streamBadgeClasses =
     streamStatus === "connected"
       ? "bg-emerald-100 text-emerald-700"
@@ -683,12 +639,10 @@ export default function App() {
         <aside className="rounded-xl border border-slate-200 bg-slate-50 p-3 shadow-sm sm:p-4">
           <div className="flex items-center justify-between">
             <h1 className="text-lg font-semibold">Sessions</h1>
-            <span className="rounded-md bg-white px-2 py-1 text-xs font-semibold text-slate-600">Step 17</span>
           </div>
           <p className="mt-1 text-xs text-slate-600">Create and switch chat sessions.</p>
 
           <div className="mt-3 flex flex-wrap gap-2">
-            <span className={`rounded-md px-2 py-1 text-xs font-medium ${healthBadgeClasses}`}>{health.status}</span>
             <span className={`rounded-md px-2 py-1 text-xs font-medium ${streamBadgeClasses}`}>{streamStatus}</span>
           </div>
 

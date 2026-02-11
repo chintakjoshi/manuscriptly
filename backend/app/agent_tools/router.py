@@ -20,7 +20,22 @@ class ToolExecutionError(Exception):
 
 class ToolInputValidationError(ToolExecutionError):
     def __init__(self, tool_name: str, message: str, *, errors: list[dict[str, Any]] | None = None) -> None:
-        super().__init__(f"Tool '{tool_name}' input validation failed: {message}")
+        details = ""
+        if errors:
+            summary_parts: list[str] = []
+            for error in errors[:3]:
+                location = error.get("loc")
+                if isinstance(location, tuple):
+                    loc_text = ".".join(str(part) for part in location)
+                elif isinstance(location, list):
+                    loc_text = ".".join(str(part) for part in location)
+                else:
+                    loc_text = str(location) if location else "input"
+                msg = str(error.get("msg") or "Invalid value")
+                summary_parts.append(f"{loc_text}: {msg}")
+            if summary_parts:
+                details = f" ({'; '.join(summary_parts)})"
+        super().__init__(f"Tool '{tool_name}' input validation failed: {message}{details}")
         self.tool_name = tool_name
         self.errors = errors or []
 
@@ -30,7 +45,10 @@ def build_default_tool_registry() -> ToolRegistry:
     registry.register(
         ToolDefinition(
             name="create_content_idea",
-            description="Generate a content plan from the user's request for a specific session.",
+            description=(
+                "Generate a content plan from the user's request. "
+                "Pass user_request as a plain string with the goal, audience, and angle."
+            ),
             input_model=CreateContentIdeaInput,
             handler=handle_create_content_idea,
         )
@@ -38,7 +56,7 @@ def build_default_tool_registry() -> ToolRegistry:
     registry.register(
         ToolDefinition(
             name="update_content_plan",
-            description="Update an existing content plan for an individual session.",
+            description="Update an existing content plan. Pass plan_id and one or more fields to change.",
             input_model=UpdateContentPlanInput,
             handler=handle_update_content_plan,
         )
@@ -46,7 +64,7 @@ def build_default_tool_registry() -> ToolRegistry:
     registry.register(
         ToolDefinition(
             name="execute_plan",
-            description="Generate full blog content using an approved plan.",
+            description="Generate full blog content from an approved plan. Pass plan_id and optional instructions.",
             input_model=ExecutePlanInput,
             handler=handle_execute_plan,
         )

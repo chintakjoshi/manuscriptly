@@ -59,7 +59,7 @@ class ToolRegistryAndRouterTests(unittest.TestCase):
 
     def test_router_rejects_invalid_tool_payload(self) -> None:
         router = ToolExecutionRouter()
-        with self.assertRaises(ToolInputValidationError):
+        with self.assertRaises(ToolInputValidationError) as ctx:
             router.execute(
                 "update_content_plan",
                 {
@@ -67,6 +67,7 @@ class ToolRegistryAndRouterTests(unittest.TestCase):
                     "plan_id": str(uuid4()),
                 },
             )
+        self.assertIn("At least one plan field", str(ctx.exception))
 
     def test_router_dispatches_registered_handler(self) -> None:
         class EchoToolInput(BaseModel):

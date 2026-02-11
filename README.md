@@ -26,7 +26,6 @@ docker compose ps
 Services:
 - Frontend: `http://localhost:5173`
 - Backend: `http://localhost:8000`
-- Health check: `http://localhost:8000/api/v1/health`
 - Swagger UI: `http://localhost:8000/apidocs/`
 - OpenAPI JSON: `http://localhost:8000/apispec_1.json`
 - Adminer: `http://localhost:8080`
@@ -94,7 +93,6 @@ python run.py
 ```
 
 Backend runs at `http://localhost:8000`.
-Health check: `GET http://localhost:8000/api/v1/health`.
 
 ### Frontend (React + Vite + Tailwind)
 
@@ -105,7 +103,7 @@ copy .env.example .env
 npm run dev
 ```
 
-Frontend runs at `http://localhost:5173` and checks backend health on load.
+Frontend runs at `http://localhost:5173`.
 
 ## Migrations (Alembic)
 
