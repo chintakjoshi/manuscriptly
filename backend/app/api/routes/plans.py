@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+import copy
 from uuid import UUID
 
 from flask import Blueprint, jsonify, request
 from pydantic import ValidationError
 from sqlalchemy import select
 
-from app.api.schemas import PlanCreateRequest, PlanUpdateRequest
+from app.api.schemas import PlanCreateRequest, PlanUpdateRequest, StartSessionFromPlanRequest
 from app.api.utils import error_response, to_json_value, validation_error_response
 from app.db.session import SessionLocal
 from app.models import ContentPlan, Conversation, User
@@ -27,6 +28,17 @@ def serialize_plan(plan: ContentPlan) -> dict:
         "status": plan.status,
         "created_at": to_json_value(plan.created_at),
         "updated_at": to_json_value(plan.updated_at),
+    }
+
+
+def serialize_session(session: Conversation) -> dict:
+    return {
+        "id": to_json_value(session.id),
+        "user_id": to_json_value(session.user_id),
+        "title": session.title,
+        "status": session.status,
+        "created_at": to_json_value(session.created_at),
+        "updated_at": to_json_value(session.updated_at),
     }
 
 
@@ -92,6 +104,78 @@ def create_plan():
         db.commit()
         db.refresh(plan)
         return jsonify(serialize_plan(plan)), 201
+    finally:
+        db.close()
+
+
+@plans_bp.post("/<uuid:plan_id>/start-session")
+def start_session_from_plan(plan_id):
+    """
+    Start a new session from an existing plan
+    ---
+    tags:
+      - Plans
+    parameters:
+      - in: path
+        name: plan_id
+        required: true
+        type: string
+        format: uuid
+      - in: body
+        name: body
+        required: false
+        schema:
+          $ref: '#/definitions/StartSessionFromPlanRequest'
+    responses:
+      201:
+        description: New session and copied plan created.
+        schema:
+          $ref: '#/definitions/StartSessionFromPlanResponse'
+      400:
+        description: Validation error.
+        schema:
+          $ref: '#/definitions/ErrorResponse'
+      404:
+        description: Plan not found.
+        schema:
+          $ref: '#/definitions/ErrorResponse'
+    """
+    payload = request.get_json(silent=True) or {}
+
+    try:
+        body = StartSessionFromPlanRequest.model_validate(payload)
+    except ValidationError as exc:
+        return validation_error_response(exc)
+
+    db = SessionLocal()
+    try:
+        source_plan = db.get(ContentPlan, plan_id)
+        if source_plan is None:
+            return error_response("Plan not found.", 404)
+
+        new_session = Conversation(
+            user_id=source_plan.user_id,
+            title=body.title or source_plan.title,
+            status=body.status,
+        )
+        db.add(new_session)
+        db.flush()
+
+        copied_plan = ContentPlan(
+            conversation_id=new_session.id,
+            user_id=source_plan.user_id,
+            title=source_plan.title,
+            description=source_plan.description,
+            target_keywords=copy.deepcopy(source_plan.target_keywords),
+            outline=copy.deepcopy(source_plan.outline),
+            research_notes=source_plan.research_notes,
+            status=source_plan.status,
+        )
+        db.add(copied_plan)
+        db.commit()
+        db.refresh(new_session)
+        db.refresh(copied_plan)
+        return jsonify({"session": serialize_session(new_session), "plan": serialize_plan(copied_plan)}), 201
     finally:
         db.close()
 

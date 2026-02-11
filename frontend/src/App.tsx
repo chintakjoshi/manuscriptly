@@ -10,18 +10,24 @@ import {
 import { SessionCreateForm } from "./components/sessions/SessionCreateForm";
 import { SessionList } from "./components/sessions/SessionList";
 import { OnboardingModal, type OnboardingFormValues } from "./components/user/OnboardingModal";
-import { ContentDisplay, type GeneratedContentItem } from "./components/workspace/ContentDisplay";
+import { ContentDisplay } from "./components/workspace/ContentDisplay";
+import { IdeaCard } from "./components/workspace/IdeaCard";
 import { PlanCard } from "./components/workspace/PlanCard";
 import { WorkspaceTabs, type WorkspaceTab } from "./components/workspace/WorkspaceTabs";
 import {
+  type ContentItemDto,
+  type ContentUpdateRequest,
   createSession,
   getUserContext,
   deletePlan,
+  listContentItems,
   listPlans,
   listSessionMessages,
   listSessions,
   sendAgentChat,
+  startSessionFromPlan,
   upsertUserOnboarding,
+  updateContentItem,
   updatePlan,
   type MessageDto,
   type PlanUpdateRequest,
@@ -122,35 +128,28 @@ function upsertToolRun(
   return updated;
 }
 
-function extractLatestGeneratedContent(messages: MessageDto[]): GeneratedContentItem | null {
-  for (let i = messages.length - 1; i >= 0; i -= 1) {
-    const message = messages[i];
-    const toolResults = asRecord(message.tool_results);
-    const items = Array.isArray(toolResults?.items) ? toolResults.items : [];
-
-    for (let j = items.length - 1; j >= 0; j -= 1) {
-      const item = asRecord(items[j]);
-      if (!item || item.name !== "execute_plan") {
-        continue;
-      }
-      const result = asRecord(item.result);
-      const contentItem = asRecord(result?.content_item);
-      if (!contentItem || typeof contentItem.id !== "string" || typeof contentItem.content !== "string") {
-        continue;
-      }
-
-      return {
-        id: contentItem.id,
-        title: typeof contentItem.title === "string" ? contentItem.title : "Generated Content",
-        content: contentItem.content,
-        word_count: typeof contentItem.word_count === "number" ? contentItem.word_count : null,
-        tags: Array.isArray(contentItem.tags) ? (contentItem.tags as string[]) : null,
-        meta_description: typeof contentItem.meta_description === "string" ? contentItem.meta_description : null,
-        created_at: typeof contentItem.created_at === "string" ? contentItem.created_at : null,
-      };
-    }
+function buildExecutePlanRequestMessage(
+  params: {
+    planId: string;
+    planTitle: string;
+    researchNotes: string | null;
+    writingInstructions?: string | null;
+  },
+): string {
+  const { planId, planTitle, researchNotes, writingInstructions } = params;
+  const normalizedNotes = researchNotes?.trim() || "None provided.";
+  const instructions = writingInstructions?.trim();
+  const lines = [
+    "Execute the approved plan and generate the full blog now.",
+    `Use execute_plan with this exact plan_id: ${planId}`,
+    `Plan title: ${planTitle}`,
+    `Research focus: ${normalizedNotes}`,
+    "Output format: markdown.",
+  ];
+  if (instructions) {
+    lines.push(`Writing instructions: ${instructions}`);
   }
-  return null;
+  return lines.join("\n");
 }
 
 export default function App() {
@@ -160,6 +159,9 @@ export default function App() {
   const [userContext, setUserContext] = useState<UserContextDto | null>(null);
   const [messages, setMessages] = useState<MessageDto[]>([]);
   const [plans, setPlans] = useState<PlanDto[]>([]);
+  const [ideaPlans, setIdeaPlans] = useState<PlanDto[]>([]);
+  const [contentItems, setContentItems] = useState<ContentItemDto[]>([]);
+  const [selectedContentId, setSelectedContentId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<WorkspaceTab>("plan");
   const [streamStatus, setStreamStatus] = useState<"connecting" | "connected" | "error">("connecting");
   const [agentState, setAgentState] = useState("Idle");
@@ -169,19 +171,31 @@ export default function App() {
   const [loadingSessions, setLoadingSessions] = useState(true);
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [loadingPlans, setLoadingPlans] = useState(false);
+  const [loadingIdeaPlans, setLoadingIdeaPlans] = useState(false);
+  const [loadingContentItems, setLoadingContentItems] = useState(false);
   const [isSending, setIsSending] = useState(false);
   const [isCreatingSession, setIsCreatingSession] = useState(false);
   const [isSavingOnboarding, setIsSavingOnboarding] = useState(false);
   const [isOnboardingOpen, setIsOnboardingOpen] = useState(false);
   const [savingPlanId, setSavingPlanId] = useState<string | null>(null);
   const [deletingPlanId, setDeletingPlanId] = useState<string | null>(null);
+  const [savingContentId, setSavingContentId] = useState<string | null>(null);
+  const [regeneratingContentId, setRegeneratingContentId] = useState<string | null>(null);
+  const [executingPlanId, setExecutingPlanId] = useState<string | null>(null);
+  const [startingSessionPlanId, setStartingSessionPlanId] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   const activeSession = useMemo(
     () => sessions.find((session) => session.id === activeSessionId) ?? null,
     [activeSessionId, sessions],
   );
-  const latestGeneratedContent = useMemo(() => extractLatestGeneratedContent(messages), [messages]);
+  const sessionTitleById = useMemo(() => {
+    const map = new Map<string, string | null>();
+    for (const session of sessions) {
+      map.set(session.id, session.title);
+    }
+    return map;
+  }, [sessions]);
   const isAgentThinking = useMemo(
     () => isSending || toolActivityPhase === "thinking" || toolActivityPhase === "tools",
     [isSending, toolActivityPhase],
@@ -215,6 +229,53 @@ export default function App() {
     } finally {
       if (showLoading) {
         setLoadingPlans(false);
+      }
+    }
+  };
+
+  const refreshIdeaPlans = async (targetUserId: string, showLoading = false) => {
+    if (!targetUserId) {
+      setIdeaPlans([]);
+      return;
+    }
+    if (showLoading) {
+      setLoadingIdeaPlans(true);
+    }
+    try {
+      const response = await listPlans({ userId: targetUserId });
+      setIdeaPlans(response.items);
+    } catch (error) {
+      setErrorMessage(parseErrorMessage(error, "Failed to load brainstorming ideas."));
+    } finally {
+      if (showLoading) {
+        setLoadingIdeaPlans(false);
+      }
+    }
+  };
+
+  const refreshContentItems = async (sessionId: string, showLoading = false) => {
+    if (!sessionId) {
+      setContentItems([]);
+      setSelectedContentId(null);
+      return;
+    }
+    if (showLoading) {
+      setLoadingContentItems(true);
+    }
+    try {
+      const response = await listContentItems({ conversationId: sessionId });
+      setContentItems(response.items);
+      setSelectedContentId((current) => {
+        if (current && response.items.some((item) => item.id === current)) {
+          return current;
+        }
+        return response.items[0]?.id ?? null;
+      });
+    } catch (error) {
+      setErrorMessage(parseErrorMessage(error, "Failed to load content drafts."));
+    } finally {
+      if (showLoading) {
+        setLoadingContentItems(false);
       }
     }
   };
@@ -327,6 +388,16 @@ export default function App() {
   }, [userId]);
 
   useEffect(() => {
+    const currentUserId = userContext?.id ?? "";
+    if (!currentUserId) {
+      setIdeaPlans([]);
+      setLoadingIdeaPlans(false);
+      return;
+    }
+    void refreshIdeaPlans(currentUserId, true);
+  }, [userContext?.id]);
+
+  useEffect(() => {
     if (!activeSessionId) {
       localStorage.removeItem(ACTIVE_SESSION_STORAGE_KEY);
       return;
@@ -339,12 +410,18 @@ export default function App() {
     if (!activeSessionId) {
       setMessages([]);
       setPlans([]);
+      setContentItems([]);
+      setSelectedContentId(null);
+      setExecutingPlanId(null);
+      setRegeneratingContentId(null);
+      setSavingContentId(null);
       setToolRuns([]);
       setExpectedToolCount(0);
       setToolActivityPhase("idle");
       setAgentState("Idle");
       setLoadingMessages(false);
       setLoadingPlans(false);
+      setLoadingContentItems(false);
       return () => {
         isMounted = false;
       };
@@ -357,27 +434,34 @@ export default function App() {
       setAgentState("Idle");
       setLoadingMessages(true);
       setLoadingPlans(true);
+      setLoadingContentItems(true);
       try {
-        const [messageResponse, planResponse] = await Promise.all([
+        const [messageResponse, planResponse, contentResponse] = await Promise.all([
           listSessionMessages(activeSessionId),
           listPlans({ conversationId: activeSessionId }),
+          listContentItems({ conversationId: activeSessionId }),
         ]);
         if (!isMounted) {
           return;
         }
         setMessages(messageResponse.items);
         setPlans(planResponse.items);
+        setContentItems(contentResponse.items);
+        setSelectedContentId(contentResponse.items[0]?.id ?? null);
       } catch (error) {
         if (!isMounted) {
           return;
         }
         setMessages([]);
         setPlans([]);
+        setContentItems([]);
+        setSelectedContentId(null);
         setErrorMessage(parseErrorMessage(error, "Failed to load workspace data."));
       } finally {
         if (isMounted) {
           setLoadingMessages(false);
           setLoadingPlans(false);
+          setLoadingContentItems(false);
         }
       }
     };
@@ -407,6 +491,10 @@ export default function App() {
           setMessages((previous) => mergeMessages(previous, [incomingMessage]));
           if (incomingMessage.role === "assistant") {
             void refreshPlans(activeSessionId);
+            void refreshContentItems(activeSessionId);
+            if (userContext?.id) {
+              void refreshIdeaPlans(userContext.id);
+            }
           }
         }
         return;
@@ -463,6 +551,17 @@ export default function App() {
           }),
         );
         setAgentState(`Tool completed: ${toolName}`);
+        if (toolName === "create_content_idea" && userContext?.id) {
+          void refreshPlans(activeSessionId);
+          void refreshIdeaPlans(userContext.id);
+        }
+        if (toolName === "execute_plan") {
+          setActiveTab("content");
+          setExecutingPlanId(null);
+          setRegeneratingContentId(null);
+          void refreshPlans(activeSessionId);
+          void refreshContentItems(activeSessionId);
+        }
         return;
       }
 
@@ -499,12 +598,14 @@ export default function App() {
         setErrorMessage(eventError);
         setToolActivityPhase("failed");
         setAgentState("Failed");
+        setExecutingPlanId(null);
+        setRegeneratingContentId(null);
       }
     }, activeSessionId);
 
     eventSource.onopen = () => setStreamStatus("connected");
     return () => disconnect();
-  }, [activeSessionId]);
+  }, [activeSessionId, userContext?.id]);
 
   const handleSaveOnboarding = async (values: OnboardingFormValues) => {
     setErrorMessage(null);
@@ -560,7 +661,7 @@ export default function App() {
     }
   };
 
-  const handleSendMessage = async (content: string) => {
+  const sendMessageToAgent = async (content: string, options?: { switchToContentOnSuccess?: boolean }) => {
     if (!activeSessionId) {
       return;
     }
@@ -595,14 +696,77 @@ export default function App() {
         return mergeMessages(withoutOptimistic, [response.user_message, response.assistant_message]);
       });
       await refreshPlans(activeSessionId);
+      await refreshContentItems(activeSessionId);
+      if (userContext?.id) {
+        await refreshIdeaPlans(userContext.id);
+      }
+      if (options?.switchToContentOnSuccess) {
+        setActiveTab("content");
+      }
       setAgentState("Idle");
     } catch (error) {
       setMessages((previous) => previous.filter((message) => message.id !== optimisticMessage.id));
       setToolActivityPhase("failed");
       setAgentState("Failed");
       setErrorMessage(parseErrorMessage(error, "Failed to send message."));
+      throw error;
     } finally {
       setIsSending(false);
+    }
+  };
+
+  const handleSendMessage = async (content: string) => {
+    try {
+      await sendMessageToAgent(content);
+    } catch {
+      // Error state is already handled in sendMessageToAgent.
+    }
+  };
+
+  const handleExecutePlan = async (plan: PlanDto) => {
+    setExecutingPlanId(plan.id);
+    try {
+      await sendMessageToAgent(
+        buildExecutePlanRequestMessage({
+          planId: plan.id,
+          planTitle: plan.title,
+          researchNotes: plan.research_notes,
+        }),
+        { switchToContentOnSuccess: true },
+      );
+    } finally {
+      setExecutingPlanId((current) => (current === plan.id ? null : current));
+    }
+  };
+
+  const handleSaveContent = async (contentItemId: string, payload: ContentUpdateRequest) => {
+    setSavingContentId(contentItemId);
+    try {
+      const updated = await updateContentItem(contentItemId, payload);
+      setContentItems((previous) => previous.map((item) => (item.id === updated.id ? updated : item)));
+    } finally {
+      setSavingContentId((current) => (current === contentItemId ? null : current));
+    }
+  };
+
+  const handleRegenerateContent = async (contentItemId: string, writingInstructions: string | null) => {
+    const item = contentItems.find((candidate) => candidate.id === contentItemId);
+    if (!item) {
+      throw new Error("Content item not found in current session.");
+    }
+    setRegeneratingContentId(contentItemId);
+    try {
+      await sendMessageToAgent(
+        buildExecutePlanRequestMessage({
+          planId: item.content_plan_id,
+          planTitle: item.title,
+          researchNotes: item.meta_description,
+          writingInstructions,
+        }),
+        { switchToContentOnSuccess: true },
+      );
+    } finally {
+      setRegeneratingContentId((current) => (current === contentItemId ? null : current));
     }
   };
 
@@ -611,6 +775,7 @@ export default function App() {
     try {
       const updated = await updatePlan(planId, payload);
       setPlans((previous) => previous.map((plan) => (plan.id === updated.id ? updated : plan)));
+      setIdeaPlans((previous) => previous.map((plan) => (plan.id === updated.id ? updated : plan)));
     } finally {
       setSavingPlanId(null);
     }
@@ -621,9 +786,44 @@ export default function App() {
     try {
       await deletePlan(planId);
       setPlans((previous) => previous.filter((plan) => plan.id !== planId));
+      setIdeaPlans((previous) => previous.filter((plan) => plan.id !== planId));
     } finally {
       setDeletingPlanId(null);
     }
+  };
+
+  const handleStartSessionFromIdea = async (plan: PlanDto) => {
+    if (!userContext?.id) {
+      setErrorMessage("Complete onboarding before starting a session from an idea.");
+      return;
+    }
+
+    setErrorMessage(null);
+    setStartingSessionPlanId(plan.id);
+    try {
+      const response = await startSessionFromPlan(plan.id, {
+        title: plan.title,
+        status: "active",
+      });
+
+      setSessions((previous) => [response.session, ...previous.filter((item) => item.id !== response.session.id)]);
+      setActiveSessionId(response.session.id);
+      setActiveTab("plan");
+      setMessages([]);
+      setPlans([response.plan]);
+      setContentItems([]);
+      setSelectedContentId(null);
+      setIdeaPlans((previous) => [response.plan, ...previous.filter((item) => item.id !== response.plan.id)]);
+    } catch (error) {
+      setErrorMessage(parseErrorMessage(error, "Failed to start a session from this idea."));
+    } finally {
+      setStartingSessionPlanId(null);
+    }
+  };
+
+  const handleOpenSessionFromIdea = (sessionId: string) => {
+    setActiveSessionId(sessionId);
+    setActiveTab("plan");
   };
 
   const streamBadgeClasses =
@@ -722,31 +922,83 @@ export default function App() {
                 </div>
 
                 {activeTab === "plan" ? (
-                  <div className="mt-3 max-h-[62vh] space-y-3 overflow-y-auto pr-1">
-                    {loadingPlans ? (
-                      <div className="rounded-xl border border-slate-200 bg-white px-3 py-6 text-sm text-slate-500">
-                        Loading plans...
+                  <div className="mt-3 max-h-[62vh] space-y-4 overflow-y-auto pr-1">
+                    <div>
+                      <div className="mb-2 flex items-center justify-between gap-2">
+                        <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Brainstorming Workspace</p>
+                        <span className="text-[11px] text-slate-500">{ideaPlans.length} idea{ideaPlans.length === 1 ? "" : "s"}</span>
                       </div>
-                    ) : plans.length === 0 ? (
-                      <div className="rounded-xl border border-dashed border-slate-300 bg-white px-3 py-6 text-sm text-slate-500">
-                        No plans yet. Ask the agent to create one.
+                      {loadingIdeaPlans ? (
+                        <div className="rounded-xl border border-slate-200 bg-white px-3 py-6 text-sm text-slate-500">
+                          Loading blog ideas...
+                        </div>
+                      ) : ideaPlans.length === 0 ? (
+                        <div className="rounded-xl border border-dashed border-slate-300 bg-white px-3 py-6 text-sm text-slate-500">
+                          No blog ideas yet. Ask the agent to brainstorm ideas.
+                        </div>
+                      ) : (
+                        <div className="space-y-3">
+                          {ideaPlans.map((plan) => (
+                            <IdeaCard
+                              key={plan.id}
+                              plan={plan}
+                              sessionTitle={sessionTitleById.get(plan.conversation_id) ?? null}
+                              isCurrentSession={plan.conversation_id === activeSessionId}
+                              starting={startingSessionPlanId === plan.id}
+                              onStartSession={handleStartSessionFromIdea}
+                              onOpenSession={handleOpenSessionFromIdea}
+                            />
+                          ))}
+                        </div>
+                      )}
+                    </div>
+
+                    <div>
+                      <div className="mb-2 flex items-center justify-between gap-2">
+                        <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Session Plans</p>
+                        <span className="text-[11px] text-slate-500">{plans.length} in this session</span>
                       </div>
-                    ) : (
-                      plans.map((plan) => (
-                        <PlanCard
-                          key={plan.id}
-                          plan={plan}
-                          onSave={handleSavePlan}
-                          onDelete={handleDeletePlan}
-                          saving={savingPlanId === plan.id}
-                          deleting={deletingPlanId === plan.id}
-                        />
-                      ))
-                    )}
+                      {loadingPlans ? (
+                        <div className="rounded-xl border border-slate-200 bg-white px-3 py-6 text-sm text-slate-500">
+                          Loading plans...
+                        </div>
+                      ) : plans.length === 0 ? (
+                        <div className="rounded-xl border border-dashed border-slate-300 bg-white px-3 py-6 text-sm text-slate-500">
+                          No plans yet. Ask the agent to create one.
+                        </div>
+                      ) : (
+                        plans.map((plan) => (
+                          <PlanCard
+                            key={plan.id}
+                            plan={plan}
+                            onSave={handleSavePlan}
+                            onDelete={handleDeletePlan}
+                            onExecute={handleExecutePlan}
+                            saving={savingPlanId === plan.id}
+                            deleting={deletingPlanId === plan.id}
+                            executing={executingPlanId === plan.id}
+                          />
+                        ))
+                      )}
+                    </div>
                   </div>
                 ) : (
                   <div className="mt-3">
-                    <ContentDisplay contentItem={latestGeneratedContent} />
+                    {loadingContentItems ? (
+                      <div className="rounded-xl border border-slate-200 bg-white px-3 py-6 text-sm text-slate-500">
+                        Loading content drafts...
+                      </div>
+                    ) : (
+                      <ContentDisplay
+                        contentItems={contentItems}
+                        selectedContentId={selectedContentId}
+                        onSelectContent={setSelectedContentId}
+                        onSave={handleSaveContent}
+                        onRegenerate={handleRegenerateContent}
+                        savingContentId={savingContentId}
+                        regeneratingContentId={regeneratingContentId}
+                      />
+                    )}
                   </div>
                 )}
               </div>

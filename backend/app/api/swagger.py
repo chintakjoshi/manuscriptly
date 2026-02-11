@@ -131,6 +131,58 @@ SWAGGER_TEMPLATE = {
                 "status": {"type": "string"},
             },
         },
+        "StartSessionFromPlanRequest": {
+            "type": "object",
+            "properties": {
+                "title": {"type": "string"},
+                "status": {"type": "string", "example": "active"},
+            },
+        },
+        "StartSessionFromPlanResponse": {
+            "type": "object",
+            "properties": {
+                "session": {"$ref": "#/definitions/Session"},
+                "plan": {"$ref": "#/definitions/Plan"},
+            },
+        },
+        "ContentItem": {
+            "type": "object",
+            "properties": {
+                "id": {"type": "string", "format": "uuid"},
+                "content_plan_id": {"type": "string", "format": "uuid"},
+                "conversation_id": {"type": "string", "format": "uuid"},
+                "user_id": {"type": "string", "format": "uuid"},
+                "title": {"type": "string"},
+                "content": {"type": "string"},
+                "html_content": {"type": "string"},
+                "markdown_content": {"type": "string"},
+                "meta_description": {"type": "string"},
+                "tags": {"type": "array", "items": {"type": "string"}},
+                "word_count": {"type": "integer"},
+                "status": {"type": "string"},
+                "version": {"type": "integer"},
+                "created_at": {"type": "string", "format": "date-time"},
+                "updated_at": {"type": "string", "format": "date-time"},
+            },
+        },
+        "ContentListResponse": {
+            "type": "object",
+            "properties": {
+                "items": {"type": "array", "items": {"$ref": "#/definitions/ContentItem"}},
+                "count": {"type": "integer"},
+            },
+        },
+        "ContentUpdateRequest": {
+            "type": "object",
+            "properties": {
+                "title": {"type": "string"},
+                "content": {"type": "string"},
+                "meta_description": {"type": "string"},
+                "tags": {"type": "array", "items": {"type": "string"}},
+                "status": {"type": "string"},
+                "change_description": {"type": "string"},
+            },
+        },
         "Message": {
             "type": "object",
             "properties": {

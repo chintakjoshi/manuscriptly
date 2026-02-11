@@ -73,6 +73,24 @@ export type PlanDto = {
   updated_at: string;
 };
 
+export type ContentItemDto = {
+  id: string;
+  content_plan_id: string;
+  conversation_id: string | null;
+  user_id: string;
+  title: string;
+  content: string;
+  html_content: string | null;
+  markdown_content: string | null;
+  meta_description: string | null;
+  tags: string[] | null;
+  word_count: number | null;
+  status: string;
+  version: number;
+  created_at: string;
+  updated_at: string;
+};
+
 type SessionListResponse = {
   items: SessionDto[];
   count: number;
@@ -88,6 +106,11 @@ type PlanListResponse = {
   count: number;
 };
 
+type ContentListResponse = {
+  items: ContentItemDto[];
+  count: number;
+};
+
 export type PlanUpdateRequest = {
   title?: string;
   description?: string | null;
@@ -95,6 +118,25 @@ export type PlanUpdateRequest = {
   outline?: Record<string, unknown>;
   research_notes?: string | null;
   status?: string;
+};
+
+export type ContentUpdateRequest = {
+  title?: string;
+  content?: string;
+  meta_description?: string | null;
+  tags?: string[] | null;
+  status?: string;
+  change_description?: string | null;
+};
+
+export type StartSessionFromPlanRequest = {
+  title?: string | null;
+  status?: string;
+};
+
+export type StartSessionFromPlanResponse = {
+  session: SessionDto;
+  plan: PlanDto;
 };
 
 export type AgentChatRequest = {
@@ -221,4 +263,59 @@ export async function deletePlan(planId: string): Promise<void> {
     const body = (await response.json().catch(() => ({}))) as { error?: string };
     throw new Error(body.error ?? `Plan delete failed with ${response.status}`);
   }
+}
+
+export async function listContentItems(filters?: {
+  conversationId?: string;
+  contentPlanId?: string;
+  userId?: string;
+}): Promise<ContentListResponse> {
+  const url = new URL(`${API_BASE_URL}/api/v1/content`);
+  if (filters?.conversationId) {
+    url.searchParams.set("conversation_id", filters.conversationId);
+  }
+  if (filters?.contentPlanId) {
+    url.searchParams.set("content_plan_id", filters.contentPlanId);
+  }
+  if (filters?.userId) {
+    url.searchParams.set("user_id", filters.userId);
+  }
+  const response = await fetch(url.toString());
+  if (!response.ok) {
+    throw new Error(`Content request failed with ${response.status}`);
+  }
+  return (await response.json()) as ContentListResponse;
+}
+
+export async function updateContentItem(contentItemId: string, payload: ContentUpdateRequest): Promise<ContentItemDto> {
+  const response = await fetch(`${API_BASE_URL}/api/v1/content/${contentItemId}`, {
+    method: "PATCH",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(payload),
+  });
+  if (!response.ok) {
+    const body = (await response.json().catch(() => ({}))) as { error?: string };
+    throw new Error(body.error ?? `Content update failed with ${response.status}`);
+  }
+  return (await response.json()) as ContentItemDto;
+}
+
+export async function startSessionFromPlan(
+  planId: string,
+  payload: StartSessionFromPlanRequest = {},
+): Promise<StartSessionFromPlanResponse> {
+  const response = await fetch(`${API_BASE_URL}/api/v1/plans/${planId}/start-session`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(payload),
+  });
+  if (!response.ok) {
+    const body = (await response.json().catch(() => ({}))) as { error?: string };
+    throw new Error(body.error ?? `Start session failed with ${response.status}`);
+  }
+  return (await response.json()) as StartSessionFromPlanResponse;
 }

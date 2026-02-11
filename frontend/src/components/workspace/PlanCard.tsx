@@ -6,15 +6,26 @@ type PlanCardProps = {
   plan: PlanDto;
   onSave: (planId: string, payload: PlanUpdateRequest) => Promise<void>;
   onDelete: (planId: string) => Promise<void>;
+  onExecute?: (plan: PlanDto) => Promise<void>;
   saving?: boolean;
   deleting?: boolean;
+  executing?: boolean;
 };
 
-export function PlanCard({ plan, onSave, onDelete, saving = false, deleting = false }: PlanCardProps) {
+export function PlanCard({
+  plan,
+  onSave,
+  onDelete,
+  onExecute,
+  saving = false,
+  deleting = false,
+  executing = false,
+}: PlanCardProps) {
   const [editing, setEditing] = useState(false);
   const [title, setTitle] = useState(plan.title);
   const [description, setDescription] = useState(plan.description ?? "");
   const [keywords, setKeywords] = useState((plan.target_keywords ?? []).join(", "));
+  const [outlineJson, setOutlineJson] = useState(JSON.stringify(plan.outline ?? {}, null, 2));
   const [researchNotes, setResearchNotes] = useState(plan.research_notes ?? "");
   const [status, setStatus] = useState(plan.status);
   const [error, setError] = useState<string | null>(null);
@@ -26,6 +37,7 @@ export function PlanCard({ plan, onSave, onDelete, saving = false, deleting = fa
     setTitle(plan.title);
     setDescription(plan.description ?? "");
     setKeywords((plan.target_keywords ?? []).join(", "));
+    setOutlineJson(JSON.stringify(plan.outline ?? {}, null, 2));
     setResearchNotes(plan.research_notes ?? "");
     setStatus(plan.status);
   }, [editing, plan]);
@@ -36,12 +48,24 @@ export function PlanCard({ plan, onSave, onDelete, saving = false, deleting = fa
       .split(",")
       .map((keyword) => keyword.trim())
       .filter(Boolean);
+    let parsedOutline: Record<string, unknown> | undefined;
+    try {
+      parsedOutline = JSON.parse(outlineJson);
+      if (!parsedOutline || typeof parsedOutline !== "object" || Array.isArray(parsedOutline)) {
+        setError("Outline must be a valid JSON object.");
+        return;
+      }
+    } catch {
+      setError("Outline must be valid JSON.");
+      return;
+    }
 
     try {
       await onSave(plan.id, {
         title: title.trim() || plan.title,
         description: description.trim() || null,
         target_keywords: parsedKeywords.length > 0 ? parsedKeywords : null,
+        outline: parsedOutline,
         research_notes: researchNotes.trim() || null,
         status: status.trim() || "draft",
       });
@@ -60,6 +84,26 @@ export function PlanCard({ plan, onSave, onDelete, saving = false, deleting = fa
       await onDelete(plan.id);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to delete plan.");
+    }
+  };
+
+  const handleExecute = async () => {
+    if (!onExecute) {
+      return;
+    }
+    const confirmation = window.confirm(
+      plan.status === "executed"
+        ? "This plan already has generated content. Execute again and generate a new draft?"
+        : "Execute this plan and generate full blog content now?",
+    );
+    if (!confirmation) {
+      return;
+    }
+    setError(null);
+    try {
+      await onExecute(plan);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to execute plan.");
     }
   };
 
@@ -93,6 +137,16 @@ export function PlanCard({ plan, onSave, onDelete, saving = false, deleting = fa
             >
               Edit
             </button>
+            {onExecute ? (
+              <button
+                type="button"
+                onClick={() => void handleExecute()}
+                disabled={executing}
+                className="rounded-md border border-indigo-300 px-2 py-1 text-xs font-semibold text-indigo-700 hover:bg-indigo-50 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {executing ? "Executing..." : "Execute Plan"}
+              </button>
+            ) : null}
             <button
               type="button"
               onClick={() => void handleDelete()}
@@ -125,6 +179,13 @@ export function PlanCard({ plan, onSave, onDelete, saving = false, deleting = fa
             onChange={(event) => setKeywords(event.target.value)}
             className="w-full rounded-md border border-slate-300 px-2 py-1.5 text-sm outline-none focus:border-slate-900"
             placeholder="Keywords (comma-separated)"
+          />
+          <textarea
+            value={outlineJson}
+            onChange={(event) => setOutlineJson(event.target.value)}
+            rows={8}
+            className="w-full rounded-md border border-slate-300 px-2 py-1.5 font-mono text-xs outline-none focus:border-slate-900"
+            placeholder='Outline JSON, for example {"sections":[{"heading":"Intro","key_points":["Point A"]}]}'
           />
           <textarea
             value={researchNotes}
