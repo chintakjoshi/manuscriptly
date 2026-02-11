@@ -4,9 +4,12 @@ import unittest
 from types import SimpleNamespace
 from uuid import uuid4
 
+import httpx
+from anthropic import APIConnectionError
 from pydantic import BaseModel
 
 from app.agent_tools import ToolDefinition, ToolExecutionRouter, ToolRegistry
+from app.core.config import Config
 from app.services.ai_service import AIService
 
 
@@ -23,7 +26,7 @@ class FakeResponse:
 
 
 class FakeMessagesAPI:
-    def __init__(self, responses: list[FakeResponse]) -> None:
+    def __init__(self, responses: list[FakeResponse | Exception]) -> None:
         self._responses = list(responses)
         self.calls: list[dict] = []
 
@@ -31,11 +34,14 @@ class FakeMessagesAPI:
         self.calls.append(kwargs)
         if not self._responses:
             raise RuntimeError("No fake response configured.")
-        return self._responses.pop(0)
+        next_item = self._responses.pop(0)
+        if isinstance(next_item, Exception):
+            raise next_item
+        return next_item
 
 
 class FakeClient:
-    def __init__(self, responses: list[FakeResponse]) -> None:
+    def __init__(self, responses: list[FakeResponse | Exception]) -> None:
         self.messages = FakeMessagesAPI(responses)
 
 
@@ -64,7 +70,7 @@ class CreateIdeaToolInput(BaseModel):
 
 
 class AIToolLoopTests(unittest.TestCase):
-    def _make_service(self, responses: list[FakeResponse], registry: ToolRegistry) -> AIService:
+    def _make_service(self, responses: list[FakeResponse | Exception], registry: ToolRegistry) -> AIService:
         conversation = SimpleNamespace(id=uuid4(), user_id=uuid4())
         service = AIService(FakeDB(conversation))
         service._client = FakeClient(responses)
@@ -231,6 +237,36 @@ class AIToolLoopTests(unittest.TestCase):
         self.assertIn("user_request", tool_calls["items"][0]["input"])
         self.assertIn("future of AI", tool_calls["items"][0]["input"]["user_request"])
         self.assertIn("future of AI", tool_results["items"][0]["result"]["user_request"])
+
+    def test_generate_reply_retries_transient_provider_error(self) -> None:
+        registry = ToolRegistry()
+        request = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
+        responses: list[FakeResponse | Exception] = [
+            APIConnectionError(message="Connection dropped.", request=request),
+            FakeResponse([FakeBlock("text", text="Recovered after retry.")]),
+        ]
+        service = self._make_service(responses, registry)
+        events: list[str] = []
+
+        original_attempts = Config.ANTHROPIC_RETRY_MAX_ATTEMPTS
+        original_base_delay = Config.ANTHROPIC_RETRY_BASE_DELAY_SECONDS
+        original_max_delay = Config.ANTHROPIC_RETRY_MAX_DELAY_SECONDS
+        Config.ANTHROPIC_RETRY_MAX_ATTEMPTS = 2
+        Config.ANTHROPIC_RETRY_BASE_DELAY_SECONDS = 0.0
+        Config.ANTHROPIC_RETRY_MAX_DELAY_SECONDS = 0.0
+        try:
+            text, _, _, _ = service.generate_assistant_reply(
+                uuid4(),
+                event_callback=lambda event_name, payload: events.append(event_name),
+            )
+        finally:
+            Config.ANTHROPIC_RETRY_MAX_ATTEMPTS = original_attempts
+            Config.ANTHROPIC_RETRY_BASE_DELAY_SECONDS = original_base_delay
+            Config.ANTHROPIC_RETRY_MAX_DELAY_SECONDS = original_max_delay
+
+        self.assertEqual(text, "Recovered after retry.")
+        self.assertEqual(len(service._client.messages.calls), 2)
+        self.assertIn("agent.response.retrying", events)
 
 
 if __name__ == "__main__":
