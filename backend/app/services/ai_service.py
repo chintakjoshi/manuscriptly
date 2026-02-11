@@ -12,7 +12,8 @@ from sqlalchemy.orm import Session
 
 from app.agent_tools import ToolExecutionError, ToolExecutionRouter, ToolRegistry, build_default_tool_registry
 from app.core.config import Config
-from app.models import Conversation, Message, User, UserProfile
+from app.models import ContentPlan, Conversation, Message, User, UserProfile
+from app.services.memory_service import AgentMemoryService
 
 BASE_SYSTEM_PROMPT = """
 You are Kaka Writer, an AI content strategist and writer assistant.
@@ -28,6 +29,7 @@ Current constraints:
 - When tool output is available, incorporate it and clearly summarize what changed.
 - Keep responses concise and actionable.
 - Do not fabricate user/company details that were not provided.
+- Reuse known memory before asking clarification questions.
 """.strip()
 
 
@@ -53,6 +55,7 @@ class AIService:
         self._client: Anthropic | None = None
         self.tool_registry: ToolRegistry = build_default_tool_registry()
         self.tool_router = ToolExecutionRouter(registry=self.tool_registry)
+        self.memory_service = AgentMemoryService(db)
 
     def generate_assistant_reply(
         self,
@@ -68,7 +71,12 @@ class AIService:
             raise AICompletionError("Conversation history is empty. Add a user message before requesting completion.")
 
         user_context = self._build_user_context(conversation.user_id)
-        system_prompt = self._build_system_prompt(user_context)
+        memory_snapshot = self._build_agent_memory(
+            conversation_id=conversation.id,
+            user_id=conversation.user_id,
+            user_context=user_context,
+        )
+        system_prompt = self._build_system_prompt(user_context, memory_snapshot)
         tool_calls_log: list[dict[str, Any]] = []
         tool_results_log: list[dict[str, Any]] = []
         conversation_messages: list[dict[str, Any]] = list(history)
@@ -100,6 +108,7 @@ class AIService:
                     "provider": "anthropic",
                     "model": Config.ANTHROPIC_MODEL,
                     "user_context": user_context,
+                    "memory_snapshot": memory_snapshot,
                     "registered_tools": [tool["name"] for tool in self.tool_registry.list_anthropic_tools()],
                     "tool_calls_count": len(tool_calls_log),
                     "tool_results_count": len(tool_results_log),
@@ -126,10 +135,15 @@ class AIService:
             conversation_messages.append({"role": "assistant", "content": parsed["assistant_blocks"]})
             tool_result_blocks: list[dict[str, Any]] = []
             for tool_use in parsed["tool_uses"]:
+                normalized_tool_input = self._normalize_tool_input(
+                    tool_name=tool_use["name"],
+                    tool_input=tool_use["input"],
+                    conversation_id=conversation_id,
+                )
                 tool_call_entry = {
                     "id": tool_use["id"],
                     "name": tool_use["name"],
-                    "input": tool_use["input"],
+                    "input": normalized_tool_input,
                     "iteration": iteration,
                 }
                 tool_calls_log.append(tool_call_entry)
@@ -146,7 +160,7 @@ class AIService:
                     )
 
                 try:
-                    execution = self.tool_router.execute(tool_use["name"], tool_use["input"])
+                    execution = self.tool_router.execute(tool_use["name"], normalized_tool_input)
                     tool_result_payload = execution["result"]
                     tool_status = "completed"
                     is_error = False
@@ -200,6 +214,87 @@ class AIService:
             f"Tool execution loop exceeded {Config.ANTHROPIC_MAX_TOOL_ITERATIONS} iterations without final text."
         )
 
+    def _normalize_tool_input(
+        self,
+        tool_name: str,
+        tool_input: dict[str, Any],
+        conversation_id: UUID,
+    ) -> dict[str, Any]:
+        normalized: dict[str, Any] = dict(tool_input or {})
+
+        if tool_name == "create_content_idea":
+            user_request = self._extract_tool_user_request(normalized)
+            if not user_request:
+                user_request = self._build_recent_user_request(conversation_id)
+            if user_request:
+                normalized["user_request"] = user_request
+
+        if tool_name in {"update_content_plan", "execute_plan"} and not normalized.get("plan_id"):
+            plan_id = self._infer_latest_plan_id(conversation_id)
+            if plan_id:
+                normalized["plan_id"] = plan_id
+
+        try:
+            definition = self.tool_registry.get(tool_name)
+            if "conversation_id" in definition.input_model.model_fields:
+                normalized["conversation_id"] = str(conversation_id)
+        except Exception:
+            pass
+
+        return normalized
+
+    @staticmethod
+    def _extract_tool_user_request(tool_input: dict[str, Any]) -> str | None:
+        direct = tool_input.get("user_request")
+        if isinstance(direct, str) and direct.strip():
+            return direct.strip()
+
+        for key in ("request", "content_request", "prompt", "brief", "description", "idea"):
+            value = tool_input.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+
+        topic = tool_input.get("topic")
+        if isinstance(topic, str) and topic.strip():
+            return f"Create a content plan about {topic.strip()}."
+        return None
+
+    def _build_recent_user_request(self, conversation_id: UUID) -> str | None:
+        try:
+            rows = (
+                self.db.execute(
+                    select(Message.content)
+                    .where(Message.conversation_id == conversation_id, Message.role == "user")
+                    .order_by(Message.created_at.desc())
+                    .limit(4)
+                )
+                .scalars()
+                .all()
+            )
+        except Exception:
+            return None
+
+        snippets = [value.strip() for value in reversed(rows) if isinstance(value, str) and value.strip()]
+        if not snippets:
+            return None
+        return " ".join(snippets)
+
+    def _infer_latest_plan_id(self, conversation_id: UUID) -> str | None:
+        try:
+            plan = (
+                self.db.execute(
+                    select(ContentPlan.id)
+                    .where(ContentPlan.conversation_id == conversation_id)
+                    .order_by(ContentPlan.updated_at.desc())
+                    .limit(1)
+                )
+                .scalar_one_or_none()
+            )
+        except Exception:
+            return None
+
+        return str(plan) if plan else None
+
     def get_registered_tools(self) -> list[dict[str, Any]]:
         return self.tool_registry.list_anthropic_tools()
 
@@ -235,7 +330,7 @@ class AIService:
         return history
 
     @staticmethod
-    def _build_system_prompt(user_context: dict[str, Any]) -> str:
+    def _build_system_prompt(user_context: dict[str, Any], memory_snapshot: dict[str, Any]) -> str:
         context_lines = [
             f"- User Name: {user_context.get('user_name') or 'Unknown'}",
             f"- Company Name: {user_context.get('company_name') or 'Unknown'}",
@@ -245,7 +340,21 @@ class AIService:
             f"- Additional Context: {user_context.get('additional_context') or 'None'}",
             f"- Content Preferences: {user_context.get('content_preferences') or 'None'}",
         ]
-        return "\n\n".join([BASE_SYSTEM_PROMPT, "User and Company Context:\n" + "\n".join(context_lines)])
+        memory_lines = AIService._format_memory_snapshot_for_prompt(memory_snapshot)
+        guardrail_lines = [
+            "- Before asking any question, check known context and memory first.",
+            "- Do not ask again for details that are already known unless the user asks to change them.",
+            "- Ask follow-up questions only when missing details are required to complete the current request.",
+        ]
+
+        return "\n\n".join(
+            [
+                BASE_SYSTEM_PROMPT,
+                "User and Company Context:\n" + "\n".join(context_lines),
+                "Agent Memory Snapshot:\n" + "\n".join(memory_lines),
+                "Memory Guardrails:\n" + "\n".join(guardrail_lines),
+            ]
+        )
 
     def _build_user_context(self, user_id: UUID) -> dict[str, Any]:
         profile = self.db.execute(select(UserProfile).where(UserProfile.user_id == user_id)).scalar_one_or_none()
@@ -259,6 +368,27 @@ class AIService:
             "content_preferences": getattr(profile, "content_preferences", None),
             "additional_context": getattr(profile, "additional_context", None),
         }
+
+    def _build_agent_memory(
+        self,
+        conversation_id: UUID,
+        user_id: UUID,
+        user_context: dict[str, Any],
+    ) -> dict[str, Any]:
+        try:
+            return self.memory_service.build_snapshot(
+                conversation_id=conversation_id,
+                user_id=user_id,
+                user_context=user_context,
+            )
+        except Exception:
+            return {
+                "known_profile_fields": [],
+                "inferred_facts": [],
+                "current_session_intents": [],
+                "cross_session_intents": [],
+                "recent_plan_memory": [],
+            }
 
     @staticmethod
     def _extract_text(response: Any) -> str:
@@ -294,6 +424,63 @@ class AIService:
             if statuses:
                 lines.append(f"Tool results: {', '.join(statuses)}")
         return "\n".join(lines)
+
+    @staticmethod
+    def _format_memory_snapshot_for_prompt(memory_snapshot: dict[str, Any]) -> list[str]:
+        lines: list[str] = []
+
+        known_profile_fields = memory_snapshot.get("known_profile_fields")
+        if isinstance(known_profile_fields, list) and known_profile_fields:
+            labels = [
+                f"{item.get('label')}: {item.get('value')}"
+                for item in known_profile_fields
+                if isinstance(item, dict) and item.get("label") and item.get("value")
+            ]
+            if labels:
+                lines.append(f"- Known profile facts: {'; '.join(labels)}")
+
+        inferred_facts = memory_snapshot.get("inferred_facts")
+        if isinstance(inferred_facts, list) and inferred_facts:
+            labels = [
+                f"{item.get('label')}: {item.get('value')}"
+                for item in inferred_facts
+                if isinstance(item, dict) and item.get("label") and item.get("value")
+            ]
+            if labels:
+                lines.append(f"- Inferred facts from prior chat: {'; '.join(labels)}")
+
+        current_session_intents = memory_snapshot.get("current_session_intents")
+        if isinstance(current_session_intents, list) and current_session_intents:
+            entries = [str(item) for item in current_session_intents if item]
+            if entries:
+                lines.append(f"- Recent current-session user requests: {' | '.join(entries)}")
+
+        cross_session_intents = memory_snapshot.get("cross_session_intents")
+        if isinstance(cross_session_intents, list) and cross_session_intents:
+            entries = [str(item) for item in cross_session_intents if item]
+            if entries:
+                lines.append(f"- Relevant requests from earlier sessions: {' | '.join(entries)}")
+
+        recent_plan_memory = memory_snapshot.get("recent_plan_memory")
+        if isinstance(recent_plan_memory, list) and recent_plan_memory:
+            plan_lines: list[str] = []
+            for item in recent_plan_memory:
+                if not isinstance(item, dict):
+                    continue
+                title = item.get("title")
+                if not title:
+                    continue
+                keywords = item.get("keywords")
+                if isinstance(keywords, list) and keywords:
+                    plan_lines.append(f"{title} (keywords: {', '.join(str(keyword) for keyword in keywords)})")
+                else:
+                    plan_lines.append(str(title))
+            if plan_lines:
+                lines.append(f"- Recent plans: {' | '.join(plan_lines)}")
+
+        if not lines:
+            return ["- No prior memory available yet."]
+        return lines
 
     @staticmethod
     def _parse_response_blocks(response: Any) -> dict[str, Any]:

@@ -9,32 +9,30 @@ import {
 } from "./components/chat/ToolActivityIndicator";
 import { SessionCreateForm } from "./components/sessions/SessionCreateForm";
 import { SessionList } from "./components/sessions/SessionList";
+import { OnboardingModal, type OnboardingFormValues } from "./components/user/OnboardingModal";
 import { ContentDisplay, type GeneratedContentItem } from "./components/workspace/ContentDisplay";
 import { PlanCard } from "./components/workspace/PlanCard";
 import { WorkspaceTabs, type WorkspaceTab } from "./components/workspace/WorkspaceTabs";
 import {
   createSession,
+  getUserContext,
   deletePlan,
-  getHealth,
   listPlans,
   listSessionMessages,
   listSessions,
   sendAgentChat,
+  upsertUserOnboarding,
   updatePlan,
   type MessageDto,
   type PlanUpdateRequest,
   type PlanDto,
   type SessionDto,
+  type UserContextDto,
 } from "./lib/api";
 import { connectLiveStream } from "./lib/sse";
 
 const ACTIVE_SESSION_STORAGE_KEY = "kaka_writer_active_session_id";
 const USER_ID_STORAGE_KEY = "kaka_writer_user_id";
-
-type HealthState = {
-  status: "idle" | "loading" | "ok" | "error";
-  message: string;
-};
 
 function mergeMessages(existing: MessageDto[], incoming: MessageDto[]): MessageDto[] {
   const byId = new Map<string, MessageDto>();
@@ -86,6 +84,14 @@ function parseErrorMessage(error: unknown, fallback: string): string {
     return error.message;
   }
   return fallback;
+}
+
+function pickInitialActiveSessionId(sessions: SessionDto[]): string | null {
+  const savedActiveSessionId = localStorage.getItem(ACTIVE_SESSION_STORAGE_KEY);
+  if (savedActiveSessionId && sessions.some((session) => session.id === savedActiveSessionId)) {
+    return savedActiveSessionId;
+  }
+  return sessions[0]?.id ?? null;
 }
 
 function upsertToolRun(
@@ -148,13 +154,10 @@ function extractLatestGeneratedContent(messages: MessageDto[]): GeneratedContent
 }
 
 export default function App() {
-  const [health, setHealth] = useState<HealthState>({
-    status: "idle",
-    message: "Waiting to check backend health...",
-  });
   const [sessions, setSessions] = useState<SessionDto[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [userId, setUserId] = useState("");
+  const [userContext, setUserContext] = useState<UserContextDto | null>(null);
   const [messages, setMessages] = useState<MessageDto[]>([]);
   const [plans, setPlans] = useState<PlanDto[]>([]);
   const [activeTab, setActiveTab] = useState<WorkspaceTab>("plan");
@@ -168,6 +171,8 @@ export default function App() {
   const [loadingPlans, setLoadingPlans] = useState(false);
   const [isSending, setIsSending] = useState(false);
   const [isCreatingSession, setIsCreatingSession] = useState(false);
+  const [isSavingOnboarding, setIsSavingOnboarding] = useState(false);
+  const [isOnboardingOpen, setIsOnboardingOpen] = useState(false);
   const [savingPlanId, setSavingPlanId] = useState<string | null>(null);
   const [deletingPlanId, setDeletingPlanId] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -220,52 +225,81 @@ export default function App() {
     const bootstrap = async () => {
       setLoadingSessions(true);
       setErrorMessage(null);
-      setHealth({ status: "loading", message: "Checking backend health..." });
-
       try {
-        const healthResponse = await getHealth();
-        if (!isMounted) {
-          return;
-        }
-        setHealth({
-          status: healthResponse.status === "ok" ? "ok" : "error",
-          message:
-            healthResponse.status === "ok"
-              ? "Backend health check passed."
-              : "Backend returned an unexpected health response.",
-        });
-      } catch (error) {
-        if (!isMounted) {
-          return;
-        }
-        setHealth({
-          status: "error",
-          message: "Backend health check failed. Start backend at http://localhost:8000.",
-        });
-        setErrorMessage(parseErrorMessage(error, "Could not connect to backend."));
-        setLoadingSessions(false);
-        return;
-      }
+        const savedUserId = localStorage.getItem(USER_ID_STORAGE_KEY) ?? "";
 
-      try {
+        if (savedUserId) {
+          try {
+            const [savedUserContext, sessionResponse] = await Promise.all([
+              getUserContext(savedUserId),
+              listSessions({ userId: savedUserId }),
+            ]);
+
+            if (!isMounted) {
+              return;
+            }
+
+            setUserContext(savedUserContext);
+            setUserId(savedUserContext.id);
+            setIsOnboardingOpen(false);
+
+            const loadedSessions = sessionResponse.items;
+            setSessions(loadedSessions);
+            setActiveSessionId(pickInitialActiveSessionId(loadedSessions));
+            return;
+          } catch {
+            if (!isMounted) {
+              return;
+            }
+            localStorage.removeItem(USER_ID_STORAGE_KEY);
+            setUserId("");
+            setUserContext(null);
+            setSessions([]);
+            setActiveSessionId(null);
+          }
+        }
+
         const sessionResponse = await listSessions();
         if (!isMounted) {
           return;
         }
 
         const loadedSessions = sessionResponse.items;
-        setSessions(loadedSessions);
+        const derivedUserId = loadedSessions[0]?.user_id ?? "";
 
-        const savedUserId = localStorage.getItem(USER_ID_STORAGE_KEY) ?? "";
-        const derivedUserId = savedUserId || loadedSessions[0]?.user_id || "";
-        setUserId(derivedUserId);
+        if (!derivedUserId) {
+          setSessions([]);
+          setUserId("");
+          setUserContext(null);
+          setActiveSessionId(null);
+          setIsOnboardingOpen(true);
+          return;
+        }
 
-        const savedActiveSessionId = localStorage.getItem(ACTIVE_SESSION_STORAGE_KEY);
-        const selectedActiveSessionId =
-          savedActiveSessionId && loadedSessions.some((session) => session.id === savedActiveSessionId)
-            ? savedActiveSessionId
-            : loadedSessions[0]?.id ?? null;
-        setActiveSessionId(selectedActiveSessionId);
+        try {
+          const derivedUserContext = await getUserContext(derivedUserId);
+          if (!isMounted) {
+            return;
+          }
+
+          setUserContext(derivedUserContext);
+          setUserId(derivedUserContext.id);
+          setIsOnboardingOpen(false);
+
+          const scopedSessions = loadedSessions.filter((session) => session.user_id === derivedUserContext.id);
+          setSessions(scopedSessions);
+          setActiveSessionId(pickInitialActiveSessionId(scopedSessions));
+        } catch (contextError) {
+          if (!isMounted) {
+            return;
+          }
+          setSessions([]);
+          setUserId("");
+          setUserContext(null);
+          setActiveSessionId(null);
+          setIsOnboardingOpen(true);
+          setErrorMessage(parseErrorMessage(contextError, "Failed to restore user context."));
+        }
       } catch (error) {
         if (!isMounted) {
           return;
@@ -472,10 +506,39 @@ export default function App() {
     return () => disconnect();
   }, [activeSessionId]);
 
+  const handleSaveOnboarding = async (values: OnboardingFormValues) => {
+    setErrorMessage(null);
+    setIsSavingOnboarding(true);
+
+    try {
+      const context = await upsertUserOnboarding({
+        user_id: userContext?.id,
+        user_name: values.userName.trim(),
+        company_name: values.companyName.trim() || null,
+        industry: values.industry.trim() || null,
+        target_audience: values.targetAudience.trim() || null,
+        brand_voice: values.brandVoice.trim() || null,
+        additional_context: values.additionalContext.trim() || null,
+      });
+
+      setUserContext(context);
+      setUserId(context.id);
+      setIsOnboardingOpen(false);
+
+      const sessionResponse = await listSessions({ userId: context.id });
+      setSessions(sessionResponse.items);
+      setActiveSessionId(pickInitialActiveSessionId(sessionResponse.items));
+    } catch (error) {
+      setErrorMessage(parseErrorMessage(error, "Failed to save user context."));
+    } finally {
+      setIsSavingOnboarding(false);
+    }
+  };
+
   const handleCreateSession = async (title: string) => {
-    const trimmedUserId = userId.trim();
+    const trimmedUserId = userContext?.id ?? userId.trim();
     if (!trimmedUserId) {
-      setErrorMessage("User ID is required to create a session.");
+      setErrorMessage("Complete onboarding before creating a session.");
       return;
     }
 
@@ -563,13 +626,6 @@ export default function App() {
     }
   };
 
-  const healthBadgeClasses =
-    health.status === "ok"
-      ? "bg-emerald-100 text-emerald-700"
-      : health.status === "error"
-        ? "bg-rose-100 text-rose-700"
-        : "bg-amber-100 text-amber-700";
-
   const streamBadgeClasses =
     streamStatus === "connected"
       ? "bg-emerald-100 text-emerald-700"
@@ -583,22 +639,30 @@ export default function App() {
         <aside className="rounded-xl border border-slate-200 bg-slate-50 p-3 shadow-sm sm:p-4">
           <div className="flex items-center justify-between">
             <h1 className="text-lg font-semibold">Sessions</h1>
-            <span className="rounded-md bg-white px-2 py-1 text-xs font-semibold text-slate-600">Step 16</span>
           </div>
           <p className="mt-1 text-xs text-slate-600">Create and switch chat sessions.</p>
 
           <div className="mt-3 flex flex-wrap gap-2">
-            <span className={`rounded-md px-2 py-1 text-xs font-medium ${healthBadgeClasses}`}>{health.status}</span>
             <span className={`rounded-md px-2 py-1 text-xs font-medium ${streamBadgeClasses}`}>{streamStatus}</span>
           </div>
 
+          <div className="mt-3 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600">
+            <div className="flex items-center justify-between gap-2">
+              <p className="font-semibold text-slate-700">Writer Profile</p>
+              <button
+                type="button"
+                onClick={() => setIsOnboardingOpen(true)}
+                className="rounded-md border border-slate-300 px-2 py-1 text-[11px] font-semibold text-slate-700 hover:bg-slate-50"
+              >
+                {userContext ? "Edit" : "Setup"}
+              </button>
+            </div>
+            <p className="mt-1 truncate">{userContext?.user_name ?? "Not configured"}</p>
+            <p className="truncate text-slate-500">{userContext?.profile.company_name ?? "No company yet"}</p>
+          </div>
+
           <div className="mt-3">
-            <SessionCreateForm
-              userId={userId}
-              onUserIdChange={setUserId}
-              onCreate={handleCreateSession}
-              loading={isCreatingSession}
-            />
+            <SessionCreateForm onCreate={handleCreateSession} loading={isCreatingSession} disabled={!userContext} />
           </div>
 
           <div className="mt-3 max-h-[52vh] overflow-y-auto pr-1">
@@ -690,6 +754,21 @@ export default function App() {
           )}
         </section>
       </div>
+      <OnboardingModal
+        open={isOnboardingOpen}
+        loading={isSavingOnboarding}
+        canDismiss={Boolean(userContext)}
+        initialValues={{
+          userName: userContext?.user_name ?? "",
+          companyName: userContext?.profile.company_name ?? "",
+          industry: userContext?.profile.industry ?? "",
+          targetAudience: userContext?.profile.target_audience ?? "",
+          brandVoice: userContext?.profile.brand_voice ?? "",
+          additionalContext: userContext?.profile.additional_context ?? "",
+        }}
+        onSubmit={handleSaveOnboarding}
+        onClose={() => setIsOnboardingOpen(false)}
+      />
     </main>
   );
 }

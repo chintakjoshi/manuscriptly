@@ -1,7 +1,3 @@
-export type HealthResponse = {
-  status: string;
-};
-
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
 
 export type SessionDto = {
@@ -11,6 +7,39 @@ export type SessionDto = {
   status: string;
   created_at: string;
   updated_at: string;
+};
+
+export type UserProfileDto = {
+  id: string | null;
+  user_id: string;
+  company_name: string | null;
+  industry: string | null;
+  target_audience: string | null;
+  brand_voice: string | null;
+  content_preferences: Record<string, unknown> | null;
+  additional_context: string | null;
+  created_at: string | null;
+  updated_at: string | null;
+};
+
+export type UserContextDto = {
+  id: string;
+  user_name: string;
+  email: string;
+  created_at: string;
+  updated_at: string;
+  profile: UserProfileDto;
+};
+
+export type UserOnboardingRequest = {
+  user_id?: string;
+  user_name: string;
+  company_name?: string | null;
+  industry?: string | null;
+  target_audience?: string | null;
+  brand_voice?: string | null;
+  content_preferences?: Record<string, unknown> | null;
+  additional_context?: string | null;
 };
 
 export type SessionCreateRequest = {
@@ -79,18 +108,13 @@ export type AgentChatResponse = {
   model: string;
 };
 
-export async function getHealth(): Promise<HealthResponse> {
-  const response = await fetch(`${API_BASE_URL}/api/v1/health`);
-
-  if (!response.ok) {
-    throw new Error(`Health request failed with ${response.status}`);
+export async function listSessions(filters?: { userId?: string }): Promise<SessionListResponse> {
+  const url = new URL(`${API_BASE_URL}/api/v1/sessions`);
+  if (filters?.userId) {
+    url.searchParams.set("user_id", filters.userId);
   }
 
-  return (await response.json()) as HealthResponse;
-}
-
-export async function listSessions(): Promise<SessionListResponse> {
-  const response = await fetch(`${API_BASE_URL}/api/v1/sessions`);
+  const response = await fetch(url.toString());
   if (!response.ok) {
     throw new Error(`Sessions request failed with ${response.status}`);
   }
@@ -110,6 +134,30 @@ export async function createSession(payload: SessionCreateRequest): Promise<Sess
     throw new Error(body.error ?? `Session create failed with ${response.status}`);
   }
   return (await response.json()) as SessionDto;
+}
+
+export async function upsertUserOnboarding(payload: UserOnboardingRequest): Promise<UserContextDto> {
+  const response = await fetch(`${API_BASE_URL}/api/v1/users/onboarding`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(payload),
+  });
+  if (!response.ok) {
+    const body = (await response.json().catch(() => ({}))) as { error?: string };
+    throw new Error(body.error ?? `User onboarding failed with ${response.status}`);
+  }
+  return (await response.json()) as UserContextDto;
+}
+
+export async function getUserContext(userId: string): Promise<UserContextDto> {
+  const response = await fetch(`${API_BASE_URL}/api/v1/users/${userId}`);
+  if (!response.ok) {
+    const body = (await response.json().catch(() => ({}))) as { error?: string };
+    throw new Error(body.error ?? `User lookup failed with ${response.status}`);
+  }
+  return (await response.json()) as UserContextDto;
 }
 
 export async function listSessionMessages(sessionId: string): Promise<MessageListResponse> {
