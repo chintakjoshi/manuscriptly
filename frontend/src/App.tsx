@@ -48,6 +48,8 @@ const DEFAULT_WORKSPACE_WIDTH = 390;
 const MIN_WORKSPACE_WIDTH = 280;
 const MIN_CHAT_WIDTH = 420;
 const HIDE_WORKSPACE_BUTTON_MIN_WIDTH = 360;
+const TOOL_ACTIVITY_SUCCESS_AUTO_HIDE_MS = 3200;
+const TOOL_ACTIVITY_FADE_OUT_MS = 320;
 
 function isTemporarySessionId(sessionId: string): boolean {
   return sessionId.startsWith(TEMP_SESSION_ID_PREFIX);
@@ -255,6 +257,8 @@ export default function App() {
   const [toolActivityPhase, setToolActivityPhase] = useState<ToolActivityPhase>("idle");
   const [toolRuns, setToolRuns] = useState<ToolRun[]>([]);
   const [expectedToolCount, setExpectedToolCount] = useState(0);
+  const [isToolActivityVisible, setIsToolActivityVisible] = useState(false);
+  const [isToolActivityFading, setIsToolActivityFading] = useState(false);
   const [loadingSessions, setLoadingSessions] = useState(true);
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [loadingPlans, setLoadingPlans] = useState(false);
@@ -272,7 +276,7 @@ export default function App() {
   const [startingSessionPlanId, setStartingSessionPlanId] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isSessionsCollapsed, setIsSessionsCollapsed] = useState(false);
-  const [isWorkspaceCollapsed, setIsWorkspaceCollapsed] = useState(false);
+  const [isWorkspaceCollapsed, setIsWorkspaceCollapsed] = useState(true);
   const [workspaceWidth, setWorkspaceWidth] = useState(DEFAULT_WORKSPACE_WIDTH);
   const [isResizingWorkspace, setIsResizingWorkspace] = useState(false);
   const [isBrainstormSectionCollapsed, setIsBrainstormSectionCollapsed] = useState(true);
@@ -294,6 +298,11 @@ export default function App() {
     () => isSending || toolActivityPhase === "thinking" || toolActivityPhase === "tools",
     [isSending, toolActivityPhase],
   );
+  const hasFailedToolRun = useMemo(() => toolRuns.some((tool) => tool.status === "failed"), [toolRuns]);
+  const shouldAutoHideToolActivity = useMemo(
+    () => toolActivityPhase === "completed" && !hasFailedToolRun && Math.max(expectedToolCount, toolRuns.length) > 0,
+    [expectedToolCount, hasFailedToolRun, toolActivityPhase, toolRuns.length],
+  );
   const toolActivitySummary = useMemo(() => {
     const failedCount = toolRuns.filter((tool) => tool.status === "failed").length;
     if (toolActivityPhase === "thinking") {
@@ -310,6 +319,42 @@ export default function App() {
     }
     return "Idle";
   }, [agentState, toolActivityPhase, toolRuns]);
+
+  useEffect(() => {
+    if (toolActivityPhase === "idle" && toolRuns.length === 0) {
+      setIsToolActivityVisible(false);
+      setIsToolActivityFading(false);
+      return;
+    }
+    setIsToolActivityVisible(true);
+    if (toolActivityPhase !== "completed") {
+      setIsToolActivityFading(false);
+    }
+  }, [toolActivityPhase, toolRuns.length]);
+
+  useEffect(() => {
+    if (!isToolActivityVisible || !shouldAutoHideToolActivity) {
+      return;
+    }
+
+    const fadeTimer = window.setTimeout(() => {
+      setIsToolActivityFading(true);
+    }, TOOL_ACTIVITY_SUCCESS_AUTO_HIDE_MS);
+
+    const hideTimer = window.setTimeout(() => {
+      setIsToolActivityVisible(false);
+      setIsToolActivityFading(false);
+      setToolActivityPhase("idle");
+      setToolRuns([]);
+      setExpectedToolCount(0);
+      setAgentState("Idle");
+    }, TOOL_ACTIVITY_SUCCESS_AUTO_HIDE_MS + TOOL_ACTIVITY_FADE_OUT_MS);
+
+    return () => {
+      window.clearTimeout(fadeTimer);
+      window.clearTimeout(hideTimer);
+    };
+  }, [isToolActivityVisible, shouldAutoHideToolActivity]);
 
   const refreshPlans = async (sessionId: string, showLoading = false) => {
     if (!isValidPersistedSessionId(sessionId)) {
@@ -574,6 +619,8 @@ export default function App() {
       setExpectedToolCount(0);
       setToolActivityPhase("idle");
       setAgentState("Idle");
+      setIsToolActivityVisible(false);
+      setIsToolActivityFading(false);
       setLoadingMessages(false);
       setLoadingPlans(false);
       setLoadingContentItems(false);
@@ -584,6 +631,8 @@ export default function App() {
     setExpectedToolCount(0);
     setToolActivityPhase("idle");
     setAgentState("Idle");
+    setIsToolActivityVisible(false);
+    setIsToolActivityFading(false);
     void loadSessionArtifacts(activeSessionId, true);
   }, [activeSessionId]);
 
@@ -898,6 +947,18 @@ export default function App() {
       if (options?.switchToContentOnSuccess) {
         setActiveTab("content");
       }
+      setToolActivityPhase((previous) => {
+        if (previous === "failed") {
+          return "failed";
+        }
+        if (previous === "tools") {
+          return "completed";
+        }
+        if (previous === "thinking") {
+          return "idle";
+        }
+        return previous;
+      });
       setAgentState("Idle");
     } catch (error) {
       setMessages((previous) => previous.filter((message) => message.id !== optimisticMessage.id));
@@ -1110,10 +1171,10 @@ export default function App() {
         : streamStatus === "disconnected"
           ? "bg-rose-500/20 text-rose-200"
           : "bg-slate-500/20 text-slate-200";
+  const gridTransitionClasses = isResizingWorkspace
+    ? "xl:transition-none"
+    : "xl:transition-[grid-template-columns] xl:duration-300 xl:ease-in-out";
   const shellGridClass = isSessionsCollapsed ? "xl:grid-cols-[68px_minmax(0,1fr)]" : "xl:grid-cols-[264px_minmax(0,1fr)]";
-  const workspaceGridClass = isWorkspaceCollapsed
-    ? "xl:grid-cols-[minmax(0,1fr)]"
-    : "xl:grid-cols-[minmax(0,1fr)_var(--workspace-width)]";
   const clampWorkspaceWidth = (nextWidth: number): number => {
     const shellWidth = shellRef.current?.clientWidth ?? window.innerWidth;
     const sessionsWidth = isSessionsCollapsed ? 68 : 264;
@@ -1122,11 +1183,9 @@ export default function App() {
   };
   const clampedWorkspaceWidth = clampWorkspaceWidth(workspaceWidth);
   const shouldShowHideWorkspaceButton = clampedWorkspaceWidth >= HIDE_WORKSPACE_BUTTON_MIN_WIDTH;
-  const workspaceGridStyle: CSSProperties | undefined = isWorkspaceCollapsed
-    ? undefined
-    : ({
-        ["--workspace-width" as string]: `${clampedWorkspaceWidth}px`,
-      } as CSSProperties);
+  const workspaceGridStyle: CSSProperties = {
+    ["--workspace-width" as string]: `${isWorkspaceCollapsed ? 0 : clampedWorkspaceWidth}px`,
+  } as CSSProperties;
   const handleWorkspaceResizeStart = (event: ReactMouseEvent<HTMLDivElement>) => {
     event.preventDefault();
     const startX = event.clientX;
@@ -1168,20 +1227,31 @@ export default function App() {
         isResizingWorkspace ? "select-none cursor-col-resize" : ""
       }`}
     >
-      <div ref={shellRef} className={`mx-auto grid min-h-screen max-w-[1920px] grid-cols-1 xl:h-full xl:min-h-0 ${shellGridClass}`}>
-        <aside className="bg-black px-3 py-4 sm:px-4 xl:flex xl:h-full xl:min-h-0 xl:flex-col">
-          {isSessionsCollapsed ? (
-            <div className="flex h-full min-h-0 flex-col items-center gap-3 pt-1">
-              <button
-                type="button"
-                onClick={() => setIsSessionsCollapsed(false)}
-                className="rounded-full bg-[#2e3542] px-2 py-1 text-sm font-semibold text-[var(--text-secondary)] hover:bg-[#3a4354]"
-              >
-                {">"}
-              </button>
-            </div>
-          ) : (
-            <>
+      <div
+        ref={shellRef}
+        className={`mx-auto grid min-h-screen max-w-[1920px] grid-cols-1 xl:h-full xl:min-h-0 ${gridTransitionClasses} ${shellGridClass}`}
+      >
+        <aside className="relative bg-black px-3 py-4 sm:px-4 xl:flex xl:h-full xl:min-h-0 xl:flex-col xl:overflow-hidden">
+          <div
+            className={`flex h-full min-h-0 flex-col items-center gap-3 pt-1 transition-[opacity,transform] duration-300 ease-in-out ${
+              isSessionsCollapsed ? "opacity-100 translate-x-0" : "pointer-events-none absolute inset-0 opacity-0 -translate-x-3"
+            }`}
+          >
+            <button
+              type="button"
+              onClick={() => setIsSessionsCollapsed(false)}
+              className="rounded-full bg-[#2e3542] px-2 py-1 text-sm font-semibold text-[var(--text-secondary)] hover:bg-[#3a4354]"
+            >
+              {">"}
+            </button>
+          </div>
+          <div
+            className={`h-full min-h-0 flex flex-col transition-[opacity,transform] duration-300 ease-in-out ${
+              isSessionsCollapsed ? "pointer-events-none absolute inset-0 opacity-0 translate-x-3" : "opacity-100 translate-x-0"
+            }`}
+          >
+            {!isSessionsCollapsed ? (
+              <>
               <div className="flex items-center justify-between">
                 <h1 className="text-lg font-semibold tracking-tight">Sessions</h1>
                 <button
@@ -1231,8 +1301,9 @@ export default function App() {
                   <SessionList sessions={sessions} activeSessionId={activeSessionId} onSelectSession={handleSelectSession} />
                 )}
               </div>
-            </>
-          )}
+              </>
+            ) : null}
+          </div>
         </aside>
 
         <section className="flex min-h-screen flex-col bg-[#181818] xl:h-full xl:min-h-0 xl:overflow-hidden">
@@ -1254,7 +1325,10 @@ export default function App() {
               No active session. Create one from the left sidebar.
             </div>
           ) : (
-            <div style={workspaceGridStyle} className={`mt-2 grid min-h-0 flex-1 grid-cols-1 gap-0 xl:overflow-hidden ${workspaceGridClass}`}>
+            <div
+              style={workspaceGridStyle}
+              className={`mt-2 grid min-h-0 flex-1 grid-cols-1 gap-0 xl:grid-cols-[minmax(0,1fr)_var(--workspace-width)] xl:overflow-hidden ${gridTransitionClasses}`}
+            >
               <div className="flex min-h-[72vh] flex-col bg-[#181818] xl:relative xl:min-h-0 xl:overflow-hidden">
                 <div className="mx-auto flex min-h-0 w-full max-w-[52rem] flex-1 flex-col px-2 sm:px-4">
                   <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
@@ -1270,6 +1344,8 @@ export default function App() {
                     summary={toolActivitySummary}
                     expectedToolCount={expectedToolCount}
                     tools={toolRuns}
+                    visible={isToolActivityVisible}
+                    isFading={isToolActivityFading}
                   />
                   <ChatInput onSend={handleSendMessage} disabled={isCreatingSession} loading={isSending} />
                 </div>
@@ -1285,8 +1361,12 @@ export default function App() {
                 ) : null}
               </div>
 
-              {!isWorkspaceCollapsed ? (
-                <div className="bg-black px-3 pb-3 pt-2 sm:px-5 xl:flex xl:min-h-0 xl:flex-col xl:px-4">
+              <div className="xl:min-h-0 xl:overflow-hidden">
+                <div
+                  className={`h-full bg-black px-3 pb-3 pt-2 transition-[opacity,transform] duration-300 ease-in-out sm:px-5 xl:flex xl:min-h-0 xl:flex-col xl:px-4 ${
+                    isWorkspaceCollapsed ? "pointer-events-none opacity-0 translate-x-4" : "opacity-100 translate-x-0"
+                  }`}
+                >
                   <div className="flex items-center justify-between gap-2">
                     <p className="text-sm font-semibold text-[var(--text-primary)]">Dynamic Workspace</p>
                     <div className="flex items-center gap-2">
@@ -1412,7 +1492,7 @@ export default function App() {
                     </div>
                   )}
                 </div>
-              ) : null}
+              </div>
             </div>
           )}
         </section>

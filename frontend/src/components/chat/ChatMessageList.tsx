@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useLayoutEffect, useRef } from "react";
 
 import type { MessageDto } from "../../lib/api";
 import { ChatMessageBubble } from "./ChatMessageBubble";
@@ -9,14 +9,26 @@ type ChatMessageListProps = {
 };
 
 export function ChatMessageList({ messages, isThinking }: ChatMessageListProps) {
-  const endRef = useRef<HTMLDivElement | null>(null);
+  const listContainerRef = useRef<HTMLDivElement | null>(null);
+  const lastMessageId = messages[messages.length - 1]?.id ?? null;
 
-  useEffect(() => {
-    endRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
-  }, [messages.length, isThinking]);
+  useLayoutEffect(() => {
+    const container = listContainerRef.current;
+    if (!container) {
+      return;
+    }
+
+    const scrollToBottom = () => {
+      container.scrollTo({ top: container.scrollHeight, behavior: "smooth" });
+    };
+
+    scrollToBottom();
+    const rafId = window.requestAnimationFrame(scrollToBottom);
+    return () => window.cancelAnimationFrame(rafId);
+  }, [lastMessageId, isThinking]);
 
   return (
-    <div className="min-h-0 flex-1 overflow-y-auto py-3 [scrollbar-gutter:stable_both-edges]">
+    <div ref={listContainerRef} className="min-h-0 flex-1 overflow-y-auto py-3 [scrollbar-gutter:stable_both-edges]">
       <ul className="m-0 w-full list-none space-y-3 p-0">
         {messages.length === 0 && (
           <li className="rounded-2xl bg-[var(--app-bg-soft)]/80 px-5 py-8 text-sm text-[var(--text-secondary)]">
@@ -36,7 +48,6 @@ export function ChatMessageList({ messages, isThinking }: ChatMessageListProps) 
           </li>
         )}
       </ul>
-      <div ref={endRef} />
     </div>
   );
 }

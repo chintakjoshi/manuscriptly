@@ -16,10 +16,19 @@ type ToolActivityIndicatorProps = {
   summary: string;
   expectedToolCount: number;
   tools: ToolRun[];
+  visible?: boolean;
+  isFading?: boolean;
 };
 
-export function ToolActivityIndicator({ phase, summary, expectedToolCount, tools }: ToolActivityIndicatorProps) {
-  if (phase === "idle" && tools.length === 0) {
+export function ToolActivityIndicator({
+  phase,
+  summary,
+  expectedToolCount,
+  tools,
+  visible = true,
+  isFading = false,
+}: ToolActivityIndicatorProps) {
+  if (!visible || (phase === "idle" && tools.length === 0)) {
     return null;
   }
 
@@ -37,7 +46,11 @@ export function ToolActivityIndicator({ phase, summary, expectedToolCount, tools
         : "bg-amber-500/20 text-amber-200";
 
   return (
-    <div className="mt-2 w-full border-t border-[#2e3440] px-3 pt-3">
+    <div
+      className={`mx-px mt-2 w-[calc(100%-2px)] rounded-3xl bg-black px-4 py-3 shadow-[inset_0_0_0_1px_#2e3440] transition-opacity duration-300 ${
+        isFading ? "opacity-0" : "opacity-100"
+      }`}
+    >
       <div className="flex items-center justify-between gap-2">
         <p className="text-[11px] font-semibold uppercase tracking-[0.13em] text-[var(--text-tertiary)]">Agent Activity</p>
         <span className={`rounded-md px-2 py-1 text-xs font-semibold ${statusChipClass}`}>{summary}</span>
@@ -76,7 +89,7 @@ export function ToolActivityIndicator({ phase, summary, expectedToolCount, tools
                   ? "bg-emerald-500/20 text-emerald-200"
                   : "bg-amber-500/20 text-amber-200";
             return (
-              <li key={`${tool.toolUseId}-${tool.iteration}`} className="border-b border-[#2e3440] px-1 py-2">
+              <li key={`${tool.toolUseId}-${tool.iteration}`} className="rounded-lg border border-[#2e3440] bg-[#14181f] px-2 py-2">
                 <div className="flex items-center justify-between gap-2">
                   <p className="text-sm font-medium text-[var(--text-primary)]">{tool.toolName}</p>
                   <span className={`rounded-md px-2 py-0.5 text-xs font-semibold ${badgeClass}`}>{tool.status}</span>
