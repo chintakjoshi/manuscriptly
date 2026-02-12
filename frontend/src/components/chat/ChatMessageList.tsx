@@ -16,10 +16,10 @@ export function ChatMessageList({ messages, isThinking }: ChatMessageListProps) 
   }, [messages.length, isThinking]);
 
   return (
-    <div className="h-[52vh] overflow-y-auto rounded-xl border border-slate-200 bg-slate-50 p-3 sm:p-4">
-      <ul className="space-y-3">
+    <div className="min-h-0 flex-1 overflow-y-auto px-2 py-3 [scrollbar-gutter:stable] sm:px-4">
+      <ul className="mx-auto w-full max-w-[52rem] space-y-3">
         {messages.length === 0 && (
-          <li className="rounded-lg border border-dashed border-slate-300 bg-white px-4 py-6 text-sm text-slate-500">
+          <li className="rounded-2xl bg-[var(--app-bg-soft)]/80 px-5 py-8 text-sm text-[var(--text-secondary)]">
             Start the conversation by describing your blog topic and goals.
           </li>
         )}
@@ -27,10 +27,11 @@ export function ChatMessageList({ messages, isThinking }: ChatMessageListProps) 
           <ChatMessageBubble key={message.id} message={message} />
         ))}
         {isThinking && (
-          <li className="flex justify-start">
-            <article className="max-w-[90%] rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm sm:max-w-[80%]">
-              <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Kaka Writer</div>
-              <p className="mt-1 text-sm leading-relaxed text-slate-700">Agent is thinking...</p>
+          <li className="fade-slide-in flex justify-start">
+            <article className="max-w-[90%] rounded-2xl bg-[var(--app-bg-soft)] px-4 py-3">
+              <p className="text-[14px] leading-6 text-[var(--text-secondary)]">
+                Agent is thinking<span className="animate-pulse">...</span>
+              </p>
             </article>
           </li>
         )}

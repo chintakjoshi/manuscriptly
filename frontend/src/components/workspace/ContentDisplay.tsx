@@ -152,7 +152,7 @@ export function ContentDisplay({
 
   if (contentItems.length === 0 || !selectedItem) {
     return (
-      <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 px-4 py-8 text-sm text-slate-500">
+      <div className="px-2 py-8 text-sm text-[var(--text-secondary)]">
         No generated content yet. Execute a plan to create a draft.
       </div>
     );
@@ -305,8 +305,15 @@ export function ContentDisplay({
 
   return (
     <div className="space-y-3">
-      <div className="rounded-xl border border-slate-200 bg-white p-3">
-        <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Drafts</p>
+      <div className="border-b border-[#2e3440] px-1 pb-3">
+        <div className="flex items-center justify-between gap-2">
+          <p className="rounded-full bg-[#2b2436] px-2 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-violet-200">
+            Drafts
+          </p>
+          <span className="rounded-full bg-[#2b2436] px-2 py-1 text-[11px] font-semibold text-violet-200">
+            {contentItems.length} draft{contentItems.length === 1 ? "" : "s"}
+          </span>
+        </div>
         <div className="mt-2 flex gap-2 overflow-x-auto pb-1">
           {contentItems.map((item) => {
             const active = item.id === selectedItem.id;
@@ -315,14 +322,14 @@ export function ContentDisplay({
                 key={item.id}
                 type="button"
                 onClick={() => onSelectContent(item.id)}
-                className={`min-w-[180px] rounded-lg border px-3 py-2 text-left ${
+                className={`min-w-[180px] rounded-lg px-3 py-2 text-left ${
                   active
-                    ? "border-slate-900 bg-slate-900 text-white"
-                    : "border-slate-200 bg-white text-slate-800 hover:border-slate-400"
+                    ? "bg-[#313947] text-[var(--text-primary)]"
+                    : "bg-transparent text-[var(--text-secondary)] hover:bg-[#2a313d]"
                 }`}
               >
                 <p className="truncate text-xs font-semibold">{item.title}</p>
-                <p className={`mt-1 text-[11px] ${active ? "text-slate-200" : "text-slate-500"}`}>
+                <p className={`mt-1 text-[11px] ${active ? "text-[var(--text-secondary)]" : "text-[var(--text-tertiary)]"}`}>
                   v{item.version} - {formatDate(item.updated_at)}
                 </p>
               </button>
@@ -331,16 +338,16 @@ export function ContentDisplay({
         </div>
       </div>
 
-      <article className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+      <article className="px-1 py-1">
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <h3 className="text-base font-semibold text-slate-900">Content Preview & Edit</h3>
+          <h3 className="text-base font-semibold text-[var(--text-primary)]">Content Preview & Edit</h3>
           <div className="flex flex-wrap items-center gap-2">
-            <div className="inline-flex rounded-md border border-slate-300 bg-white p-1">
+            <div className="inline-flex rounded-full bg-[#2a313d] p-1">
               <button
                 type="button"
                 onClick={() => setViewMode("preview")}
-                className={`rounded px-2 py-1 text-xs font-semibold ${
-                  viewMode === "preview" ? "bg-slate-900 text-white" : "text-slate-600 hover:bg-slate-100"
+                className={`rounded-full px-2 py-1 text-xs font-semibold ${
+                  viewMode === "preview" ? "bg-[var(--text-primary)] text-[#111318]" : "text-[var(--text-secondary)] hover:bg-[#343c4c]"
                 }`}
               >
                 Preview
@@ -348,14 +355,14 @@ export function ContentDisplay({
               <button
                 type="button"
                 onClick={() => setViewMode("edit")}
-                className={`rounded px-2 py-1 text-xs font-semibold ${
-                  viewMode === "edit" ? "bg-slate-900 text-white" : "text-slate-600 hover:bg-slate-100"
+                className={`rounded-full px-2 py-1 text-xs font-semibold ${
+                  viewMode === "edit" ? "bg-[var(--text-primary)] text-[#111318]" : "text-[var(--text-secondary)] hover:bg-[#343c4c]"
                 }`}
               >
                 Edit Markdown
               </button>
             </div>
-            <span className="rounded-md bg-slate-100 px-2 py-1 text-xs font-medium text-slate-600">{wordCount} words</span>
+            <span className="rounded-full bg-[#2f3643] px-2 py-1 text-xs font-medium text-[var(--text-secondary)]">{wordCount} words</span>
           </div>
         </div>
 
@@ -367,7 +374,7 @@ export function ContentDisplay({
               setTitle(event.target.value);
               clearNotices();
             }}
-            className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm outline-none focus:border-slate-900"
+            className="w-full rounded-xl bg-[#2a313d] px-3 py-2 text-sm text-[var(--text-primary)] outline-none"
             placeholder="Content title"
           />
           <textarea
@@ -377,7 +384,7 @@ export function ContentDisplay({
               clearNotices();
             }}
             rows={2}
-            className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm outline-none focus:border-slate-900"
+            className="w-full rounded-xl bg-[#2a313d] px-3 py-2 text-sm text-[var(--text-primary)] outline-none"
             placeholder="Meta description"
           />
           <input
@@ -387,7 +394,7 @@ export function ContentDisplay({
               setTags(event.target.value);
               clearNotices();
             }}
-            className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm outline-none focus:border-slate-900"
+            className="w-full rounded-xl bg-[#2a313d] px-3 py-2 text-sm text-[var(--text-primary)] outline-none"
             placeholder="Tags (comma-separated)"
           />
           <input
@@ -397,7 +404,7 @@ export function ContentDisplay({
               setStatus(event.target.value);
               clearNotices();
             }}
-            className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm outline-none focus:border-slate-900"
+            className="w-full rounded-xl bg-[#2a313d] px-3 py-2 text-sm text-[var(--text-primary)] outline-none"
             placeholder="Status"
           />
           {viewMode === "edit" ? (
@@ -408,13 +415,13 @@ export function ContentDisplay({
                 clearNotices();
               }}
               rows={16}
-              className="w-full rounded-md border border-slate-300 px-3 py-2 font-mono text-xs leading-relaxed outline-none focus:border-slate-900"
+              className="w-full rounded-xl bg-[#1f2530] px-3 py-2 font-mono text-xs leading-relaxed text-[var(--text-primary)] outline-none"
               placeholder="Generated markdown content"
             />
           ) : (
-            <div className="max-h-[480px] overflow-y-auto rounded-md border border-slate-200 bg-slate-50 px-4 py-3">
+            <div className="max-h-[480px] overflow-y-auto rounded-xl bg-[#1c212b] px-4 py-3">
               {content.trim() ? (
-                <div className="markdown-preview text-sm text-slate-800">
+                <div className="markdown-preview text-sm text-[var(--text-secondary)]">
                   <ReactMarkdown
                     remarkPlugins={[remarkGfm]}
                     rehypePlugins={[[rehypeHighlight, { detect: true, ignoreMissing: true }]]}
@@ -423,7 +430,7 @@ export function ContentDisplay({
                   </ReactMarkdown>
                 </div>
               ) : (
-                <p className="text-sm text-slate-500">No content to preview yet.</p>
+                <p className="text-sm text-[var(--text-tertiary)]">No content to preview yet.</p>
               )}
             </div>
           )}
@@ -434,7 +441,7 @@ export function ContentDisplay({
             type="button"
             onClick={() => void handleSave()}
             disabled={savingContentId === selectedItem.id}
-            className="rounded-md bg-slate-900 px-3 py-1.5 text-xs font-semibold text-white hover:bg-slate-700 disabled:cursor-not-allowed disabled:bg-slate-400"
+            className="rounded-full bg-[var(--text-primary)] px-3 py-1.5 text-xs font-semibold text-[#101215] hover:opacity-90 disabled:cursor-not-allowed disabled:bg-slate-500 disabled:text-slate-200"
           >
             {savingContentId === selectedItem.id ? "Saving..." : "Save Changes"}
           </button>
@@ -442,43 +449,43 @@ export function ContentDisplay({
             type="button"
             onClick={() => void handleRegenerate()}
             disabled={regeneratingContentId === selectedItem.id}
-            className="rounded-md border border-indigo-300 px-3 py-1.5 text-xs font-semibold text-indigo-700 hover:bg-indigo-50 disabled:cursor-not-allowed disabled:opacity-60"
+            className="rounded-full bg-[#193029] px-3 py-1.5 text-xs font-semibold text-emerald-200 hover:bg-[#214036] disabled:cursor-not-allowed disabled:opacity-60"
           >
             {regeneratingContentId === selectedItem.id ? "Regenerating..." : "Regenerate"}
           </button>
           <button
             type="button"
             onClick={() => void handleCopyMarkdown()}
-            className="rounded-md border border-slate-300 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-100"
+            className="rounded-full bg-[#2e3542] px-3 py-1.5 text-xs font-semibold text-[var(--text-secondary)] hover:bg-[#384153]"
           >
             Copy Markdown
           </button>
           <button
             type="button"
             onClick={() => void handleCopyPlainText()}
-            className="rounded-md border border-slate-300 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-100"
+            className="rounded-full bg-[#2e3542] px-3 py-1.5 text-xs font-semibold text-[var(--text-secondary)] hover:bg-[#384153]"
           >
             Copy Text
           </button>
           <button
             type="button"
             onClick={handleExportMarkdown}
-            className="rounded-md border border-emerald-300 px-3 py-1.5 text-xs font-semibold text-emerald-700 hover:bg-emerald-50"
+            className="rounded-full bg-[#213a33] px-3 py-1.5 text-xs font-semibold text-emerald-200 hover:bg-[#28473f]"
           >
             Export .md
           </button>
           <button
             type="button"
             onClick={handleExportPlainText}
-            className="rounded-md border border-emerald-300 px-3 py-1.5 text-xs font-semibold text-emerald-700 hover:bg-emerald-50"
+            className="rounded-full bg-[#213a33] px-3 py-1.5 text-xs font-semibold text-emerald-200 hover:bg-[#28473f]"
           >
             Export .txt
           </button>
         </div>
 
-        {saveNotice ? <p className="mt-3 rounded-md bg-emerald-100 px-3 py-2 text-xs text-emerald-700">{saveNotice}</p> : null}
-        {actionNotice ? <p className="mt-3 rounded-md bg-sky-100 px-3 py-2 text-xs text-sky-700">{actionNotice}</p> : null}
-        {error ? <p className="mt-3 rounded-md bg-rose-100 px-3 py-2 text-xs text-rose-700">{error}</p> : null}
+        {saveNotice ? <p className="mt-3 rounded-xl bg-[#203a31] px-3 py-2 text-xs text-emerald-200">{saveNotice}</p> : null}
+        {actionNotice ? <p className="mt-3 rounded-xl bg-[#1f3442] px-3 py-2 text-xs text-sky-200">{actionNotice}</p> : null}
+        {error ? <p className="mt-3 rounded-xl bg-[#3d2430] px-3 py-2 text-xs text-rose-200">{error}</p> : null}
       </article>
     </div>
   );

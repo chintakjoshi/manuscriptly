@@ -1,13 +1,23 @@
-@import "highlight.js/styles/github.css";
+@import url("https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap");
+@import "highlight.js/styles/atom-one-dark.css";
 
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 :root {
-  color: #0f172a;
-  background-color: #f8fafc;
-  font-family: "Inter", "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+  color-scheme: dark;
+  --app-bg: #141619;
+  --app-bg-elevated: #1c1f24;
+  --app-bg-soft: #20242a;
+  --app-bg-muted: #262b33;
+  --text-primary: #f3f5f7;
+  --text-secondary: #b6bfca;
+  --text-tertiary: #8592a2;
+  --accent: #10a37f;
+  --accent-soft: rgba(16, 163, 127, 0.14);
+  --danger: #f87171;
+  font-family: "Space Grotesk", "Segoe UI", sans-serif;
 }
 
 * {
@@ -16,13 +26,57 @@
 
 body {
   margin: 0;
+  min-height: 100vh;
+  background:
+    radial-gradient(80vw 80vh at 82% -8%, rgba(16, 163, 127, 0.12), transparent 60%),
+    radial-gradient(80vw 80vh at -10% 110%, rgba(36, 99, 235, 0.11), transparent 58%),
+    var(--app-bg);
+  color: var(--text-primary);
+}
+
+#root {
+  min-height: 100vh;
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #3b4350 transparent;
+}
+
+*::-webkit-scrollbar {
+  width: 9px;
+  height: 9px;
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+*::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: #37414e;
+}
+
+.fade-slide-in {
+  animation: fade-slide-in 0.3s ease both;
+}
+
+@keyframes fade-slide-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .markdown-preview h1,
 .markdown-preview h2,
 .markdown-preview h3,
 .markdown-preview h4 {
-  color: #0f172a;
+  color: #f6f8fb;
   font-weight: 700;
   line-height: 1.2;
   margin-top: 1.1rem;
@@ -44,6 +98,7 @@ body {
 .markdown-preview p {
   margin: 0.55rem 0;
   line-height: 1.65;
+  color: #d8dee7;
 }
 
 .markdown-preview ul,
@@ -54,23 +109,26 @@ body {
 
 .markdown-preview li {
   margin: 0.2rem 0;
+  color: #d8dee7;
 }
 
 .markdown-preview blockquote {
   margin: 0.75rem 0;
-  border-left: 3px solid #94a3b8;
+  border-left: 3px solid #3f4a59;
   padding-left: 0.75rem;
-  color: #475569;
+  color: #b5c0cf;
 }
 
 .markdown-preview a {
-  color: #0369a1;
+  color: #67d8b7;
   text-decoration: underline;
   text-decoration-thickness: 1px;
 }
 
 .markdown-preview pre {
-  border-radius: 0.5rem;
+  border: 1px solid #2f3742;
+  border-radius: 0.85rem;
+  background-color: #111419;
   margin: 0.75rem 0;
   overflow-x: auto;
   padding: 0.85rem;
@@ -78,12 +136,15 @@ body {
 
 .markdown-preview code {
   border-radius: 0.35rem;
-  background-color: #e2e8f0;
+  background-color: #2b3240;
   padding: 0.1rem 0.35rem;
   font-size: 0.83em;
+  color: #d6e8ff;
+  font-family: "IBM Plex Mono", monospace;
 }
 
 .markdown-preview pre code {
   background-color: transparent;
+  color: #dce4ef;
   padding: 0;
 }

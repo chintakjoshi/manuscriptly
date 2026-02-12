@@ -108,32 +108,32 @@ export function PlanCard({
   };
 
   return (
-    <article className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
+    <article className="border-b border-[#2e3440] px-1 py-3">
       <div className="flex items-start justify-between gap-3">
         <div>
-          <p className="text-xs uppercase tracking-wide text-slate-500">Plan</p>
-          <h3 className="text-sm font-semibold text-slate-900">{plan.title}</h3>
+          <p className="text-[11px] uppercase tracking-[0.12em] text-[var(--text-tertiary)]">Plan</p>
+          <h3 className="text-sm font-semibold text-[var(--text-primary)]">{plan.title}</h3>
         </div>
-        <span className="rounded-md bg-slate-100 px-2 py-1 text-xs font-medium text-slate-600">{plan.status}</span>
+        <span className="rounded-full bg-[#2b313c] px-2 py-1 text-xs font-medium text-[var(--text-secondary)]">{plan.status}</span>
       </div>
 
       {!editing ? (
         <>
-          <p className="mt-2 whitespace-pre-wrap text-sm text-slate-700">{plan.description || "No description."}</p>
+          <p className="mt-2 whitespace-pre-wrap text-sm text-[var(--text-secondary)]">{plan.description || "No description."}</p>
           <div className="mt-2 flex flex-wrap gap-1">
-            {(plan.target_keywords ?? []).length === 0 && <span className="text-xs text-slate-500">No keywords</span>}
+            {(plan.target_keywords ?? []).length === 0 && <span className="text-xs text-[var(--text-tertiary)]">No keywords</span>}
             {(plan.target_keywords ?? []).map((keyword) => (
-              <span key={keyword} className="rounded-md bg-slate-100 px-2 py-1 text-xs text-slate-700">
+              <span key={keyword} className="rounded-full bg-[#282f3a] px-2 py-1 text-xs text-[var(--text-secondary)]">
                 {keyword}
               </span>
             ))}
           </div>
-          <p className="mt-2 whitespace-pre-wrap text-xs text-slate-600">{plan.research_notes || "No research notes."}</p>
+          <p className="mt-2 whitespace-pre-wrap text-xs text-[var(--text-tertiary)]">{plan.research_notes || "No research notes."}</p>
           <div className="mt-3 flex gap-2">
             <button
               type="button"
               onClick={() => setEditing(true)}
-              className="rounded-md border border-slate-300 px-2 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-100"
+              className="rounded-full bg-[#2e3542] px-2 py-1 text-xs font-semibold text-[var(--text-secondary)] hover:bg-[#384153]"
             >
               Edit
             </button>
@@ -142,7 +142,7 @@ export function PlanCard({
                 type="button"
                 onClick={() => void handleExecute()}
                 disabled={executing}
-                className="rounded-md border border-indigo-300 px-2 py-1 text-xs font-semibold text-indigo-700 hover:bg-indigo-50 disabled:cursor-not-allowed disabled:opacity-60"
+                className="rounded-full bg-[#193029] px-2 py-1 text-xs font-semibold text-emerald-200 hover:bg-[#214036] disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {executing ? "Executing..." : "Execute Plan"}
               </button>
@@ -151,7 +151,7 @@ export function PlanCard({
               type="button"
               onClick={() => void handleDelete()}
               disabled={deleting}
-              className="rounded-md border border-rose-300 px-2 py-1 text-xs font-semibold text-rose-700 hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-60"
+              className="rounded-full bg-[#382028] px-2 py-1 text-xs font-semibold text-rose-200 hover:bg-[#482833] disabled:cursor-not-allowed disabled:opacity-60"
             >
               {deleting ? "Deleting..." : "Delete"}
             </button>
@@ -163,42 +163,42 @@ export function PlanCard({
             type="text"
             value={title}
             onChange={(event) => setTitle(event.target.value)}
-            className="w-full rounded-md border border-slate-300 px-2 py-1.5 text-sm outline-none focus:border-slate-900"
+            className="w-full rounded-xl bg-[#2a313d] px-2 py-1.5 text-sm text-[var(--text-primary)] outline-none"
             placeholder="Plan title"
           />
           <textarea
             value={description}
             onChange={(event) => setDescription(event.target.value)}
             rows={3}
-            className="w-full rounded-md border border-slate-300 px-2 py-1.5 text-sm outline-none focus:border-slate-900"
+            className="w-full rounded-xl bg-[#2a313d] px-2 py-1.5 text-sm text-[var(--text-primary)] outline-none"
             placeholder="Description"
           />
           <input
             type="text"
             value={keywords}
             onChange={(event) => setKeywords(event.target.value)}
-            className="w-full rounded-md border border-slate-300 px-2 py-1.5 text-sm outline-none focus:border-slate-900"
+            className="w-full rounded-xl bg-[#2a313d] px-2 py-1.5 text-sm text-[var(--text-primary)] outline-none"
             placeholder="Keywords (comma-separated)"
           />
           <textarea
             value={outlineJson}
             onChange={(event) => setOutlineJson(event.target.value)}
             rows={8}
-            className="w-full rounded-md border border-slate-300 px-2 py-1.5 font-mono text-xs outline-none focus:border-slate-900"
+            className="w-full rounded-xl bg-[#2a313d] px-2 py-1.5 font-mono text-xs text-[var(--text-primary)] outline-none"
             placeholder='Outline JSON, for example {"sections":[{"heading":"Intro","key_points":["Point A"]}]}'
           />
           <textarea
             value={researchNotes}
             onChange={(event) => setResearchNotes(event.target.value)}
             rows={3}
-            className="w-full rounded-md border border-slate-300 px-2 py-1.5 text-sm outline-none focus:border-slate-900"
+            className="w-full rounded-xl bg-[#2a313d] px-2 py-1.5 text-sm text-[var(--text-primary)] outline-none"
             placeholder="Research notes"
           />
           <input
             type="text"
             value={status}
             onChange={(event) => setStatus(event.target.value)}
-            className="w-full rounded-md border border-slate-300 px-2 py-1.5 text-sm outline-none focus:border-slate-900"
+            className="w-full rounded-xl bg-[#2a313d] px-2 py-1.5 text-sm text-[var(--text-primary)] outline-none"
             placeholder="Status"
           />
           <div className="flex gap-2">
@@ -206,7 +206,7 @@ export function PlanCard({
               type="button"
               onClick={() => void handleSave()}
               disabled={saving}
-              className="rounded-md bg-slate-900 px-2.5 py-1 text-xs font-semibold text-white hover:bg-slate-700 disabled:cursor-not-allowed disabled:bg-slate-400"
+              className="rounded-full bg-[var(--text-primary)] px-2.5 py-1 text-xs font-semibold text-[#101215] hover:opacity-90 disabled:cursor-not-allowed disabled:bg-slate-500 disabled:text-slate-200"
             >
               {saving ? "Saving..." : "Save"}
             </button>
@@ -216,7 +216,7 @@ export function PlanCard({
                 setEditing(false);
                 setError(null);
               }}
-              className="rounded-md border border-slate-300 px-2.5 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-100"
+              className="rounded-full bg-[#2e3542] px-2.5 py-1 text-xs font-semibold text-[var(--text-secondary)] hover:bg-[#384153]"
             >
               Cancel
             </button>
@@ -224,7 +224,7 @@ export function PlanCard({
         </div>
       )}
 
-      {error && <p className="mt-2 rounded-md bg-rose-100 px-2 py-1 text-xs text-rose-700">{error}</p>}
+      {error && <p className="mt-2 rounded-xl bg-[#3d2430]/80 px-2 py-1 text-xs text-rose-200">{error}</p>}
     </article>
   );
 }

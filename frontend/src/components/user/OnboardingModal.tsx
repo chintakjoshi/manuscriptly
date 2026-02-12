@@ -69,13 +69,13 @@ export function OnboardingModal({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4">
-      <div className="w-full max-w-xl rounded-2xl border border-slate-200 bg-white shadow-2xl">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#0c0f14]/70 p-4 backdrop-blur-sm">
+      <div className="w-full max-w-xl rounded-3xl bg-[#1d232d] shadow-2xl">
         <form onSubmit={(event) => void handleSubmit(event)} className="space-y-3 p-4 sm:p-5">
           <div className="flex items-start justify-between gap-3">
             <div>
-              <h2 className="text-lg font-semibold text-slate-900">Setup your writer profile</h2>
-              <p className="mt-1 text-sm text-slate-600">
+              <h2 className="text-lg font-semibold text-[var(--text-primary)]">Setup your writer profile</h2>
+              <p className="mt-1 text-sm text-[var(--text-secondary)]">
                 This context is saved and injected into the agent prompt automatically.
               </p>
             </div>
@@ -83,7 +83,7 @@ export function OnboardingModal({
               <button
                 type="button"
                 onClick={onClose}
-                className="rounded-md border border-slate-300 px-2 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50"
+                className="rounded-full bg-[#2c3442] px-2 py-1 text-xs font-medium text-[var(--text-secondary)] hover:bg-[#364053]"
               >
                 Close
               </button>
@@ -91,68 +91,68 @@ export function OnboardingModal({
           </div>
 
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            <label className="text-xs text-slate-600">
+            <label className="text-xs text-[var(--text-secondary)]">
               Name
               <input
                 type="text"
                 value={values.userName}
                 onChange={(event) => updateField("userName", event.target.value)}
                 placeholder="Your name"
-                className="mt-1 w-full rounded-lg border border-slate-300 px-2 py-2 text-sm outline-none focus:border-slate-900 focus:ring-1 focus:ring-slate-900"
+                className="mt-1 w-full rounded-xl bg-[#2a313d] px-2 py-2 text-sm text-[var(--text-primary)] outline-none"
                 required
               />
             </label>
-            <label className="text-xs text-slate-600">
+            <label className="text-xs text-[var(--text-secondary)]">
               Company
               <input
                 type="text"
                 value={values.companyName}
                 onChange={(event) => updateField("companyName", event.target.value)}
                 placeholder="Company name"
-                className="mt-1 w-full rounded-lg border border-slate-300 px-2 py-2 text-sm outline-none focus:border-slate-900 focus:ring-1 focus:ring-slate-900"
+                className="mt-1 w-full rounded-xl bg-[#2a313d] px-2 py-2 text-sm text-[var(--text-primary)] outline-none"
               />
             </label>
-            <label className="text-xs text-slate-600">
+            <label className="text-xs text-[var(--text-secondary)]">
               Industry
               <input
                 type="text"
                 value={values.industry}
                 onChange={(event) => updateField("industry", event.target.value)}
                 placeholder="e.g. SaaS, Ecommerce"
-                className="mt-1 w-full rounded-lg border border-slate-300 px-2 py-2 text-sm outline-none focus:border-slate-900 focus:ring-1 focus:ring-slate-900"
+                className="mt-1 w-full rounded-xl bg-[#2a313d] px-2 py-2 text-sm text-[var(--text-primary)] outline-none"
               />
             </label>
-            <label className="text-xs text-slate-600">
+            <label className="text-xs text-[var(--text-secondary)]">
               Brand voice
               <input
                 type="text"
                 value={values.brandVoice}
                 onChange={(event) => updateField("brandVoice", event.target.value)}
                 placeholder="e.g. Practical and confident"
-                className="mt-1 w-full rounded-lg border border-slate-300 px-2 py-2 text-sm outline-none focus:border-slate-900 focus:ring-1 focus:ring-slate-900"
+                className="mt-1 w-full rounded-xl bg-[#2a313d] px-2 py-2 text-sm text-[var(--text-primary)] outline-none"
               />
             </label>
           </div>
 
-          <label className="block text-xs text-slate-600">
+          <label className="block text-xs text-[var(--text-secondary)]">
             Target audience
             <textarea
               value={values.targetAudience}
               onChange={(event) => updateField("targetAudience", event.target.value)}
               rows={2}
               placeholder="Who are you writing for?"
-              className="mt-1 w-full rounded-lg border border-slate-300 px-2 py-2 text-sm outline-none focus:border-slate-900 focus:ring-1 focus:ring-slate-900"
+              className="mt-1 w-full rounded-xl bg-[#2a313d] px-2 py-2 text-sm text-[var(--text-primary)] outline-none"
             />
           </label>
 
-          <label className="block text-xs text-slate-600">
+          <label className="block text-xs text-[var(--text-secondary)]">
             Additional context
             <textarea
               value={values.additionalContext}
               onChange={(event) => updateField("additionalContext", event.target.value)}
               rows={3}
               placeholder="Goals, constraints, products, or current campaign context"
-              className="mt-1 w-full rounded-lg border border-slate-300 px-2 py-2 text-sm outline-none focus:border-slate-900 focus:ring-1 focus:ring-slate-900"
+              className="mt-1 w-full rounded-xl bg-[#2a313d] px-2 py-2 text-sm text-[var(--text-primary)] outline-none"
             />
           </label>
 
@@ -161,7 +161,7 @@ export function OnboardingModal({
               <button
                 type="button"
                 onClick={onClose}
-                className="rounded-lg border border-slate-300 px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                className="rounded-full bg-[#2c3442] px-3 py-2 text-xs font-semibold text-[var(--text-secondary)] hover:bg-[#364053]"
               >
                 Cancel
               </button>
@@ -169,7 +169,7 @@ export function OnboardingModal({
             <button
               type="submit"
               disabled={loading || !values.userName.trim()}
-              className="rounded-lg bg-slate-900 px-3 py-2 text-xs font-semibold text-white hover:bg-slate-700 disabled:cursor-not-allowed disabled:bg-slate-400"
+              className="rounded-full bg-[var(--text-primary)] px-3 py-2 text-xs font-semibold text-[#101215] hover:opacity-90 disabled:cursor-not-allowed disabled:bg-slate-500 disabled:text-slate-200"
             >
               {loading ? "Saving..." : "Save Profile"}
             </button>

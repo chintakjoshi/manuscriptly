@@ -20,11 +20,7 @@ export function SessionCreateForm({ disabled = false, onCreate, loading = false 
   };
 
   return (
-    <form onSubmit={(event) => void handleSubmit(event)} className="space-y-2 rounded-xl border border-slate-200 bg-white p-3">
-      <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Create Session</p>
-      <label className="block text-xs text-slate-600" htmlFor="session-title">
-        Title
-      </label>
+    <form onSubmit={(event) => void handleSubmit(event)} className="space-y-2 px-1 py-2">
       <input
         id="session-title"
         type="text"
@@ -32,12 +28,12 @@ export function SessionCreateForm({ disabled = false, onCreate, loading = false 
         onChange={(event) => setTitle(event.target.value)}
         placeholder="Optional session title"
         disabled={loading || disabled}
-        className="w-full rounded-lg border border-slate-300 px-2 py-2 text-xs outline-none focus:border-slate-900 focus:ring-1 focus:ring-slate-900"
+        className="w-full rounded-xl bg-[#252b36] px-3 py-2 text-xs text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)] focus:bg-[#2e3542]"
       />
       <button
         type="submit"
         disabled={loading || disabled}
-        className="w-full rounded-lg bg-slate-900 px-3 py-2 text-xs font-semibold text-white hover:bg-slate-700 disabled:cursor-not-allowed disabled:bg-slate-400"
+        className="w-full rounded-xl bg-[var(--text-primary)] px-3 py-2 text-xs font-semibold text-[#101215] hover:opacity-90 disabled:cursor-not-allowed disabled:bg-slate-500 disabled:text-slate-200"
       >
         {loading ? "Creating..." : "Create Session"}
       </button>

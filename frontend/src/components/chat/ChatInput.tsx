@@ -40,30 +40,34 @@ export function ChatInput({ onSend, disabled = false, loading = false }: ChatInp
   };
 
   return (
-    <form onSubmit={(event) => void handleSubmit(event)} className="mt-4">
+    <form onSubmit={(event) => void handleSubmit(event)} className="px-2 pb-2 pt-3 sm:px-4 sm:pb-4">
       <label htmlFor="chat-input" className="sr-only">
         Message
       </label>
-      <div className="flex items-end gap-2">
+      <div className="mx-auto flex w-full max-w-[52rem] items-end gap-2 rounded-3xl bg-black p-2 shadow-[0_8px_36px_rgba(0,0,0,0.28)]">
         <textarea
           id="chat-input"
           value={value}
           onChange={(event) => setValue(event.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder="Describe the content you want to create..."
+          placeholder="Ask anything about your next blog..."
           disabled={disabled || loading}
-          rows={3}
-          className="min-h-[78px] flex-1 resize-y rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-slate-900 focus:ring-1 focus:ring-slate-900 disabled:cursor-not-allowed disabled:bg-slate-100"
+          rows={2}
+          className="min-h-[52px] max-h-40 flex-1 resize-y bg-transparent px-1 py-2 text-[15px] text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)] disabled:cursor-not-allowed disabled:opacity-60"
         />
         <button
           type="submit"
           disabled={disabled || loading || value.trim().length === 0}
-          className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:bg-slate-400"
+          aria-label="Send message"
+          className="flex h-9 w-9 shrink-0 items-center justify-center self-end rounded-full bg-[var(--text-primary)] text-lg font-semibold leading-none text-[#101215] transition hover:opacity-90 disabled:cursor-not-allowed disabled:bg-slate-500 disabled:text-slate-200"
         >
-          {loading ? "Sending..." : "Send"}
+          {loading ? "\u2026" : "\u2191"}
         </button>
       </div>
-      <p className="mt-2 text-xs text-slate-500">Press Enter to send. Use Shift+Enter for newline.</p>
+      <p className="mx-auto mt-2 w-full max-w-[52rem] px-2 text-[11px] text-[var(--text-tertiary)]">
+        Enter to send. Shift+Enter for newline.
+      </p>
     </form>
   );
 }
+
