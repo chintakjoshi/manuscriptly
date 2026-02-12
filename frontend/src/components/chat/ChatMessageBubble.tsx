@@ -1,4 +1,6 @@
 import type { MessageDto } from "../../lib/api";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { MessageContextTooltip } from "./MessageContextTooltip";
 
 type ChatMessageBubbleProps = {
@@ -23,7 +25,13 @@ export function ChatMessageBubble({ message }: ChatMessageBubbleProps) {
             <MessageContextTooltip contextUsed={contextUsed} messageId={message.id} />
           </div>
         ) : null}
-        <p className={`whitespace-pre-wrap text-[14px] leading-6 ${messageTextClasses}`}>{message.content}</p>
+        {isUser ? (
+          <p className={`whitespace-pre-wrap text-[14px] leading-6 ${messageTextClasses}`}>{message.content}</p>
+        ) : (
+          <div className="markdown-preview chat-markdown text-[14px] leading-6 text-[#f0f0f0]">
+            <ReactMarkdown remarkPlugins={[remarkGfm]}>{message.content}</ReactMarkdown>
+          </div>
+        )}
       </article>
     </li>
   );

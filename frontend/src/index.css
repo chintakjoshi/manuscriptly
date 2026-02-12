@@ -148,3 +148,11 @@ body {
   color: #dce4ef;
   padding: 0;
 }
+
+.chat-markdown > :first-child {
+  margin-top: 0;
+}
+
+.chat-markdown > :last-child {
+  margin-bottom: 0;
+}
