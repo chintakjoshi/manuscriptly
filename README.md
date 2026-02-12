@@ -64,7 +64,7 @@ copy .env.example .env
 Key frontend env values:
 - `VITE_API_BASE_URL` (default: `http://localhost:8000`)
 
-## Run with Docker (Recommended)
+## Run with Docker
 
 From repo root:
 
@@ -96,31 +96,6 @@ Reset DB volume:
 
 ```powershell
 docker compose down -v
-```
-
-## Run Locally (Without Docker)
-
-## 1) Start PostgreSQL
-
-Create DB `kaka_writer` and confirm `backend/.env` `DATABASE_URL` points to it.
-
-## 2) Start backend
-
-```powershell
-cd backend
-python -m venv venv
-.\venv\Scripts\Activate.ps1
-pip install -r requirements.txt
-alembic upgrade head
-python run.py
-```
-
-## 3) Start frontend
-
-```powershell
-cd frontend
-npm install
-npm run dev
 ```
 
 ## Testing
