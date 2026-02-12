@@ -41,7 +41,8 @@ class _FakeAIServiceSuccess:
     def __init__(self, db) -> None:  # noqa: ANN001
         self.db = db
 
-    def generate_assistant_reply(self, conversation_id, event_callback=None):  # noqa: ANN001
+    def generate_assistant_reply(self, conversation_id, event_callback=None, preferred_plan_id=None):  # noqa: ANN001
+        _ = preferred_plan_id
         if event_callback:
             event_callback(
                 "agent.tools.detected",
@@ -77,7 +78,8 @@ class _FakeAIServiceFailure:
     def __init__(self, db) -> None:  # noqa: ANN001
         self.db = db
 
-    def generate_assistant_reply(self, conversation_id, event_callback=None):  # noqa: ANN001
+    def generate_assistant_reply(self, conversation_id, event_callback=None, preferred_plan_id=None):  # noqa: ANN001
+        _ = conversation_id, event_callback, preferred_plan_id
         raise AICompletionError("Provider timeout")
 
 

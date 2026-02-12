@@ -9,10 +9,11 @@ from anthropic import Anthropic
 from anthropic import APIConnectionError, APIError, APITimeoutError
 from sqlalchemy.orm import Session
 
-from app.agent_tools.schemas import CreateContentIdeaInput, ExecutePlanInput, UpdateContentPlanInput
+from app.agent_tools.schemas import CreateContentIdeaInput, ExecutePlanInput, UpdateContentPlanInput, WebSearchInput
 from app.core.config import Config
 from app.db.session import SessionLocal
 from app.models import ContentItem, ContentPlan, ContentVersion, Conversation, ToolExecution, User, UserProfile
+from app.services.web_search_service import WebSearchService, WebSearchServiceError
 
 
 class ToolHandlerError(Exception):
@@ -37,6 +38,10 @@ def handle_update_content_plan(payload: UpdateContentPlanInput) -> dict[str, Any
 
 def handle_execute_plan(payload: ExecutePlanInput) -> dict[str, Any]:
     return _run_tool("execute_plan", payload, _execute_plan)
+
+
+def handle_web_search(payload: WebSearchInput) -> dict[str, Any]:
+    return _run_tool("web_search", payload, _web_search)
 
 
 def _run_tool(tool_name: str, payload: Any, operation: Any) -> dict[str, Any]:
@@ -155,9 +160,18 @@ def _execute_plan(db: Session, conversation: Conversation, payload: ExecutePlanI
 
     return {
         "status": "success",
+        "generation_mode": generated.get("generation_mode", "ai"),
         "content_item": _serialize_content_item(content_item),
         "plan": _serialize_plan(plan),
     }
+
+
+def _web_search(db: Session, conversation: Conversation, payload: WebSearchInput) -> dict[str, Any]:
+    del db, conversation
+    try:
+        return WebSearchService().search(payload.query, payload.max_results)
+    except WebSearchServiceError as exc:
+        raise ToolValidationError(str(exc)) from exc
 
 
 def _get_conversation_or_raise(db: Session, conversation_id: Any) -> Conversation:
@@ -219,19 +233,25 @@ def _generate_blog_fields(
     writing_instructions: str | None,
     output_format: str,
 ) -> dict[str, Any]:
+    fallback_fields = _generate_blog_fallback(plan, writing_instructions, output_format)
     user_context = _build_user_context(db, conversation.user_id)
     ai_fields = _generate_blog_with_ai(plan, writing_instructions, output_format, user_context)
     if ai_fields is None:
-        return _generate_blog_fallback(plan, writing_instructions, output_format)
+        return fallback_fields
 
     content = _coerce_string(ai_fields.get("content"), "", 200000)
-    if not content.strip():
-        return _generate_blog_fallback(plan, writing_instructions, output_format)
+    if not content.strip() or _looks_like_template_content(content):
+        return fallback_fields
     return {
         "title": _coerce_string(ai_fields.get("title"), plan.title, 500),
         "content": content,
-        "meta_description": _coerce_nullable_string(ai_fields.get("meta_description"), max_len=500),
+        "meta_description": _coerce_nullable_string(
+            ai_fields.get("meta_description"),
+            fallback=_derive_meta_description_from_content(content, plan.description),
+            max_len=500,
+        ),
         "tags": _normalize_tags(ai_fields.get("tags"), plan.target_keywords),
+        "generation_mode": "ai",
     }
 
 
@@ -285,7 +305,11 @@ def _generate_blog_with_ai(
         "Generate full blog content from this plan and return strict JSON only.\n"
         "Required keys: title, content, meta_description, tags.\n"
         "- tags must be an array of short strings.\n"
-        f"- content must be in {output_format} format.\n\n"
+        f"- content must be in {output_format} format.\n"
+        "- Write complete, publication-ready prose with clear section headings.\n"
+        "- Do not return placeholders like 'Section' headings, bullet-only scaffolds, or writing notes.\n"
+        "- Target approximately 1000-1800 words unless the plan explicitly requests shorter output.\n\n"
+        "If JSON cannot be followed, return a complete article in plain markdown text.\n\n"
         f"Plan (JSON):\n{json.dumps(_serialize_plan(plan), ensure_ascii=True)}\n\n"
         f"Writing instructions:\n{writing_instructions or 'None provided.'}\n\n"
         f"User context (JSON):\n{json.dumps(user_context, ensure_ascii=True)}"
@@ -301,8 +325,50 @@ def _generate_blog_with_ai(
             messages=[{"role": "user", "content": prompt}],
         )
         text = _extract_text_from_response(response)
-        return _parse_json_from_text(text)
-    except (APIError, APIConnectionError, APITimeoutError, ToolHandlerError, json.JSONDecodeError):
+        parsed = _coerce_blog_payload_from_text(text, plan)
+        if parsed is not None:
+            return parsed
+
+        markdown_retry = _generate_blog_markdown_retry_with_ai(
+            client=client,
+            plan=plan,
+            writing_instructions=writing_instructions,
+            user_context=user_context,
+        )
+        if markdown_retry is None:
+            return None
+        return _coerce_blog_payload_from_text(markdown_retry, plan)
+    except (APIError, APIConnectionError, APITimeoutError, ToolHandlerError):
+        return None
+
+
+def _generate_blog_markdown_retry_with_ai(
+    client: Anthropic,
+    plan: ContentPlan,
+    writing_instructions: str | None,
+    user_context: dict[str, Any],
+) -> str | None:
+    prompt = (
+        "Write a complete blog article in plain markdown only.\n"
+        "Do not return JSON. Do not wrap in code fences.\n"
+        "Requirements:\n"
+        "- Use a single H1 title, then section headings with ##.\n"
+        "- Write complete prose paragraphs (not bullet-only scaffolds).\n"
+        "- Keep it concise enough to fit a normal blog draft in one response.\n\n"
+        f"Plan (JSON):\n{json.dumps(_serialize_plan(plan), ensure_ascii=True)}\n\n"
+        f"Writing instructions:\n{writing_instructions or 'None provided.'}\n\n"
+        f"User context (JSON):\n{json.dumps(user_context, ensure_ascii=True)}"
+    )
+    try:
+        response = client.messages.create(
+            model=Config.ANTHROPIC_MODEL,
+            max_tokens=Config.ANTHROPIC_MAX_TOKENS,
+            temperature=Config.ANTHROPIC_TEMPERATURE,
+            system="You are a senior blog writer. Return markdown only.",
+            messages=[{"role": "user", "content": prompt}],
+        )
+        return _extract_text_from_response(response)
+    except (APIError, APIConnectionError, APITimeoutError, ToolHandlerError):
         return None
 
 
@@ -333,39 +399,39 @@ def _generate_blog_fallback(
     output_format: str,
 ) -> dict[str, Any]:
     sections = _extract_outline_sections(plan.outline)
-    intro = plan.description or "This article is generated from the approved plan."
+    intro = _coerce_string(
+        plan.description,
+        "This article translates the approved plan into a complete, reader-friendly draft with practical context and clear narrative flow.",
+        2000,
+    )
     lines: list[str] = []
     if output_format.strip().lower() == "markdown":
         lines.append(f"# {plan.title}")
         lines.append("")
         lines.append(intro)
         lines.append("")
-        if writing_instructions:
-            lines.append(f"_Writing notes: {writing_instructions.strip()}_")
-            lines.append("")
-        for section in sections:
+        for index, section in enumerate(sections, start=1):
             lines.append(f"## {section['heading']}")
             lines.append("")
-            lines.append(section["body"])
+            lines.append(_expand_outline_section(plan, section, index, len(sections), writing_instructions))
             lines.append("")
     else:
         lines.append(plan.title)
         lines.append("")
         lines.append(intro)
         lines.append("")
-        if writing_instructions:
-            lines.append(f"Writing notes: {writing_instructions.strip()}")
-            lines.append("")
-        for section in sections:
+        for index, section in enumerate(sections, start=1):
             lines.append(section["heading"])
-            lines.append(section["body"])
+            lines.append(_expand_outline_section(plan, section, index, len(sections), writing_instructions))
             lines.append("")
 
+    fallback_content = "\n".join(lines).strip()
     return {
         "title": plan.title,
-        "content": "\n".join(lines).strip(),
-        "meta_description": _coerce_nullable_string(plan.description, max_len=500),
+        "content": fallback_content,
+        "meta_description": _derive_meta_description_from_content(fallback_content, plan.description),
         "tags": _normalize_tags(plan.target_keywords, plan.target_keywords),
+        "generation_mode": "fallback",
     }
 
 
@@ -388,6 +454,84 @@ def _parse_json_from_text(text: str) -> dict[str, Any]:
     if start == -1 or end == -1 or end <= start:
         raise json.JSONDecodeError("No JSON object found.", text, 0)
     return json.loads(text[start : end + 1])
+
+
+def _coerce_blog_payload_from_text(text: str, plan: ContentPlan) -> dict[str, Any] | None:
+    sanitized = _strip_code_fence(text)
+    if not sanitized:
+        return None
+
+    try:
+        parsed = _parse_json_from_text(sanitized)
+    except json.JSONDecodeError:
+        parsed = None
+
+    if isinstance(parsed, dict):
+        return parsed
+
+    if _looks_like_jsonish_text(sanitized):
+        return None
+
+    if _count_words(sanitized) < 120:
+        return None
+    return {
+        "title": _extract_title_from_content(sanitized, plan.title),
+        "content": sanitized,
+        "meta_description": _derive_meta_description_from_content(sanitized, plan.description),
+        "tags": _normalize_tags(plan.target_keywords, plan.target_keywords),
+    }
+
+
+def _strip_code_fence(text: str) -> str:
+    normalized = text.strip()
+    if normalized.startswith("```"):
+        normalized = re.sub(r"^```[a-zA-Z0-9_-]*\s*", "", normalized)
+    normalized = re.sub(r"\s*```\s*$", "", normalized)
+    return normalized.strip()
+
+
+def _looks_like_jsonish_text(text: str) -> bool:
+    stripped = text.strip()
+    if not stripped:
+        return False
+    if stripped.startswith("{") or stripped.startswith("["):
+        return True
+    if re.search(r'(?m)^\s*"title"\s*:\s*', stripped):
+        return True
+    if re.search(r'(?m)^\s*"content"\s*:\s*', stripped):
+        return True
+    if re.search(r'(?i)\A(?:json\s+)?\{', stripped):
+        return True
+    return False
+
+
+def _extract_title_from_content(content: str, fallback_title: str) -> str:
+    markdown_title = re.search(r"(?m)^\s*#\s+(.+?)\s*$", content)
+    if markdown_title:
+        return _coerce_string(markdown_title.group(1), fallback_title, 500)
+
+    for raw_line in content.splitlines():
+        line = raw_line.strip()
+        if (
+            not line
+            or line.startswith(("-", "*", ">", "#", "`", "{", "}", "[", "]"))
+            or line.startswith('"')
+            or line.endswith("{")
+            or ":" in line[:30]
+        ):
+            continue
+        if len(line) <= 120:
+            return _coerce_string(line, fallback_title, 500)
+    return fallback_title[:500]
+
+
+def _derive_meta_description_from_content(content: str, fallback: str | None) -> str | None:
+    for raw_line in content.splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith(("#", "-", "*", ">")):
+            continue
+        return _coerce_nullable_string(line, fallback=fallback, max_len=500)
+    return _coerce_nullable_string(fallback, max_len=500)
 
 
 def _build_user_context(db: Session, user_id: Any) -> dict[str, Any]:
@@ -470,37 +614,137 @@ def _coerce_nullable_string(value: Any, fallback: str | None = None, max_len: in
     return text[:max_len]
 
 
-def _extract_outline_sections(outline: dict[str, Any]) -> list[dict[str, str]]:
-    sections_raw = outline.get("sections")
+def _extract_outline_sections(outline: dict[str, Any]) -> list[dict[str, Any]]:
+    sections_raw = outline.get("sections") if isinstance(outline, dict) else None
     if not isinstance(sections_raw, list):
         return [
             {
-                "heading": "Main Section",
-                "body": "Expand this section with practical examples, actionable advice, and concise takeaways.",
+                "heading": "Core Ideas",
+                "key_points": [
+                    "Explain the central idea in plain language.",
+                    "Give one practical example readers can visualize.",
+                    "Connect the insight to a real decision or outcome.",
+                ],
             }
         ]
 
-    sections: list[dict[str, str]] = []
-    for item in sections_raw:
+    sections: list[dict[str, Any]] = []
+    for index, item in enumerate(sections_raw, start=1):
         if isinstance(item, dict):
-            heading = _coerce_string(item.get("heading"), "Section", 200)
+            raw_heading = _coerce_string(item.get("heading"), "", 200)
             key_points = item.get("key_points")
-            if isinstance(key_points, list) and key_points:
-                body = " ".join(f"- {str(point).strip()}" for point in key_points if str(point).strip())
-            else:
-                body = _coerce_string(item.get("body"), "Add clear arguments, examples, and recommendations.", 2000)
-            sections.append({"heading": heading, "body": body})
+            normalized_points = (
+                [str(point).strip() for point in key_points if str(point).strip()]
+                if isinstance(key_points, list)
+                else []
+            )
+            body_text = _coerce_nullable_string(item.get("body"), max_len=2000)
+            if body_text:
+                normalized_points.append(body_text)
+            heading = _normalize_section_heading(raw_heading, normalized_points, index)
+            sections.append({"heading": heading, "key_points": normalized_points})
         elif isinstance(item, str) and item.strip():
-            sections.append({"heading": item.strip()[:200], "body": "Add supporting details and examples."})
+            heading = _normalize_section_heading(item.strip()[:200], [], index)
+            sections.append({"heading": heading, "key_points": []})
 
     if not sections:
         return [
             {
-                "heading": "Main Section",
-                "body": "Expand this section with practical examples, actionable advice, and concise takeaways.",
+                "heading": "Core Ideas",
+                "key_points": [
+                    "Explain the central idea in plain language.",
+                    "Give one practical example readers can visualize.",
+                    "Connect the insight to a real decision or outcome.",
+                ],
             }
         ]
     return sections
+
+
+def _normalize_section_heading(raw_heading: str, key_points: list[str], index: int) -> str:
+    heading = raw_heading.strip()
+    if heading.lower() in {"section", "main section", "section heading"}:
+        heading = ""
+
+    if not heading and key_points:
+        first_point = re.sub(r"\s+", " ", key_points[0]).strip(" .,:;!-")
+        if first_point:
+            words = first_point.split(" ")
+            heading = " ".join(words[:8]).title()
+
+    if not heading:
+        heading = f"Key Insight {index}"
+    return heading[:200]
+
+
+def _looks_like_template_content(content: str) -> bool:
+    if re.search(r"(?im)^##\s*section\s*$", content):
+        return True
+    if re.search(r"(?i)\badd supporting details\b|\badd clear arguments\b|\bexpand this section\b", content):
+        return True
+
+    section_placeholders = len(re.findall(r"(?im)^##\s*section\s*$", content))
+    bullet_lines = len(re.findall(r"(?m)^\s*[-*]\s+", content))
+    if section_placeholders >= 2:
+        return True
+    if _count_words(content) < 260 and bullet_lines >= 10:
+        return True
+    return False
+
+
+def _expand_outline_section(
+    plan: ContentPlan,
+    section: dict[str, Any],
+    section_index: int,
+    section_count: int,
+    writing_instructions: str | None,
+) -> str:
+    heading = _coerce_string(section.get("heading"), f"Key Insight {section_index}", 200)
+    raw_points = section.get("key_points")
+    points = [str(point).strip() for point in raw_points if str(point).strip()] if isinstance(raw_points, list) else []
+    if not points:
+        points = [
+            f"Explain why {heading.lower()} matters for the reader.",
+            "Provide a practical example with visible outcomes.",
+            "Highlight a common mistake and how to avoid it.",
+        ]
+
+    core_sentences = [_ensure_sentence(point) for point in points[:4]]
+    opening = (
+        f"{heading} gives this topic real shape and momentum. "
+        f"It helps readers connect the big idea in '{plan.title}' to decisions, behaviors, and outcomes they can recognize."
+    )
+    development = " ".join(core_sentences[:2]).strip()
+    practical = (
+        "To keep the section useful, pair each insight with context: what changed, why it worked, and what the audience can apply next."
+    )
+    supporting = " ".join(core_sentences[2:]).strip()
+
+    tone_hint = ""
+    if writing_instructions:
+        instruction_text = writing_instructions.strip().lower()
+        if "inspiration" in instruction_text or "story" in instruction_text:
+            tone_hint = " A short, concrete story can make this section far more memorable."
+        elif "practical" in instruction_text or "actionable" in instruction_text:
+            tone_hint = " End this section with one clear action the reader can take immediately."
+
+    position_hint = ""
+    if section_index == section_count:
+        position_hint = " This final section should close with a confident takeaway that reinforces the article's central message."
+
+    paragraph = f"{opening} {development} {practical}"
+    if supporting:
+        paragraph = f"{paragraph} {supporting}"
+    return re.sub(r"\s+", " ", f"{paragraph}{tone_hint}{position_hint}").strip()
+
+
+def _ensure_sentence(text: str) -> str:
+    cleaned = re.sub(r"\s+", " ", text).strip(" -")
+    if not cleaned:
+        return ""
+    if cleaned[-1] not in ".!?":
+        cleaned = f"{cleaned}."
+    return cleaned[0].upper() + cleaned[1:]
 
 
 def _count_words(text: str) -> int:

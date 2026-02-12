@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import time
 from collections.abc import Callable
 from typing import Any
@@ -24,13 +25,19 @@ Your goals:
 2. Provide high-quality, practical writing guidance.
 3. Ask concise clarification questions only when critical information is missing.
 4. Keep tone and style consistent with user/company context when provided.
-5. Use available tools when the user requests plan creation, plan updates, or full content generation.
+5. Always use available tools when needed for planning, updates, full content generation, or current-web research.
+6. When using tools, ensure inputs are complete and accurate, and incorporate tool results into your response.
+7. Avoid unnecessary back-and-forth; use tools to get information or perform tasks whenever possible instead of asking the user for details you can obtain through tools or memory.
+8. If you don't know the answer to a question, use web_search to find the information instead of making up an answer or asking the user.
+9. When generating mutiple different plan or content in same session, always run agents with the most recent plan_id to ensure you have the latest context, and if no plan_id is provided, try to infer it from conversation history or memory.
 
 Current constraints:
 - When tool output is available, incorporate it and clearly summarize what changed.
 - Keep responses concise and actionable.
 - Do not fabricate user/company details that were not provided.
 - Reuse known memory before asking clarification questions.
+- If the user needs current or factual external information, use web_search before answering.
+- Internal resource IDs are hidden; never ask users for raw UUIDs like plan_id or message IDs.
 """.strip()
 
 
@@ -51,6 +58,17 @@ class ConversationNotFoundError(AIServiceError):
 
 
 class AIService:
+    _REDACTED_TOKEN = "[redacted]"
+    _SENSITIVE_ID_FIELDS = {
+        "id",
+        "conversation_id",
+        "user_id",
+        "plan_id",
+        "content_plan_id",
+        "content_item_id",
+        "assistant_message_id",
+    }
+
     def __init__(self, db: Session) -> None:
         self.db = db
         self._client: Anthropic | None = None
@@ -62,6 +80,7 @@ class AIService:
         self,
         conversation_id: UUID,
         event_callback: Callable[[str, dict[str, Any]], None] | None = None,
+        preferred_plan_id: UUID | None = None,
     ) -> tuple[str, dict[str, Any], dict[str, Any] | None, dict[str, Any] | None]:
         conversation = self.db.get(Conversation, conversation_id)
         if conversation is None:
@@ -81,6 +100,7 @@ class AIService:
         tool_calls_log: list[dict[str, Any]] = []
         tool_results_log: list[dict[str, Any]] = []
         conversation_messages: list[dict[str, Any]] = list(history)
+        auto_tool_attempted = False
 
         for iteration in range(1, Config.ANTHROPIC_MAX_TOOL_ITERATIONS + 1):
             try:
@@ -97,8 +117,24 @@ class AIService:
                 raise AICompletionError(f"Unexpected AI completion failure: {exc}") from exc
 
             parsed = self._parse_response_blocks(response)
+            assistant_text_candidate = parsed["text"].strip()
             if not parsed["tool_uses"]:
-                assistant_text = parsed["text"].strip()
+                if not auto_tool_attempted:
+                    auto_triggered = self._maybe_autorun_intent_tool(
+                        conversation_id=conversation_id,
+                        conversation_messages=conversation_messages,
+                        preferred_plan_id=preferred_plan_id,
+                        tool_calls_log=tool_calls_log,
+                        tool_results_log=tool_results_log,
+                        iteration=iteration,
+                        assistant_text_hint=assistant_text_candidate,
+                        event_callback=event_callback,
+                    )
+                    if auto_triggered:
+                        auto_tool_attempted = True
+                        continue
+
+                assistant_text = assistant_text_candidate
                 if not assistant_text:
                     raise AICompletionError("Anthropic response did not include assistant text.")
 
@@ -137,11 +173,12 @@ class AIService:
                     tool_name=tool_use["name"],
                     tool_input=tool_use["input"],
                     conversation_id=conversation_id,
+                    preferred_plan_id=preferred_plan_id,
                 )
                 tool_call_entry = {
                     "id": tool_use["id"],
                     "name": tool_use["name"],
-                    "input": normalized_tool_input,
+                    "input": self._sanitize_tool_payload(normalized_tool_input),
                     "iteration": iteration,
                 }
                 tool_calls_log.append(tool_call_entry)
@@ -154,6 +191,9 @@ class AIService:
                             "tool_use_id": tool_use["id"],
                             "tool_name": tool_use["name"],
                             "iteration": iteration,
+                            "activity_message": self._build_tool_activity_message(
+                                tool_use["name"], normalized_tool_input
+                            ),
                         },
                     )
 
@@ -170,6 +210,9 @@ class AIService:
                                 "tool_use_id": tool_use["id"],
                                 "tool_name": tool_use["name"],
                                 "iteration": iteration,
+                                "activity_message": self._build_tool_result_message(
+                                    tool_use["name"], tool_result_payload
+                                ),
                             },
                         )
                 except ToolExecutionError as exc:
@@ -185,6 +228,9 @@ class AIService:
                                 "tool_name": tool_use["name"],
                                 "iteration": iteration,
                                 "error": str(exc),
+                                "activity_message": self._build_tool_failure_message(
+                                    tool_use["name"], str(exc)
+                                ),
                             },
                         )
 
@@ -192,15 +238,16 @@ class AIService:
                     "tool_use_id": tool_use["id"],
                     "name": tool_use["name"],
                     "status": tool_status,
-                    "result": tool_result_payload,
+                    "result": self._sanitize_tool_payload(tool_result_payload),
                     "iteration": iteration,
                 }
                 tool_results_log.append(tool_result_entry)
 
+                tool_result_payload_for_model = self._sanitize_tool_payload(tool_result_payload)
                 result_block: dict[str, Any] = {
                     "type": "tool_result",
                     "tool_use_id": tool_use["id"],
-                    "content": json.dumps(tool_result_payload, default=str),
+                    "content": json.dumps(tool_result_payload_for_model, default=str),
                 }
                 if is_error:
                     result_block["is_error"] = True
@@ -281,6 +328,7 @@ class AIService:
         tool_name: str,
         tool_input: dict[str, Any],
         conversation_id: UUID,
+        preferred_plan_id: UUID | None = None,
     ) -> dict[str, Any]:
         normalized: dict[str, Any] = dict(tool_input or {})
 
@@ -291,10 +339,31 @@ class AIService:
             if user_request:
                 normalized["user_request"] = user_request
 
-        if tool_name in {"update_content_plan", "execute_plan"} and not normalized.get("plan_id"):
-            plan_id = self._infer_latest_plan_id(conversation_id)
-            if plan_id:
-                normalized["plan_id"] = plan_id
+        if tool_name in {"update_content_plan", "execute_plan"}:
+            if preferred_plan_id is not None:
+                normalized["plan_id"] = str(preferred_plan_id)
+            else:
+                normalized_plan_id = self._normalize_uuid_text(normalized.get("plan_id"))
+                if normalized_plan_id:
+                    normalized["plan_id"] = normalized_plan_id
+                else:
+                    inferred_plan_id = self._infer_latest_executable_plan_id(conversation_id)
+                    if inferred_plan_id is None:
+                        inferred_plan_id = self._infer_latest_plan_id(conversation_id)
+                    if inferred_plan_id:
+                        normalized["plan_id"] = inferred_plan_id
+                    else:
+                        normalized.pop("plan_id", None)
+
+        if tool_name == "web_search":
+            if not isinstance(normalized.get("query"), str) or not str(normalized.get("query")).strip():
+                inferred_query = self._extract_tool_user_request(normalized) or self._build_recent_user_request(
+                    conversation_id
+                )
+                if inferred_query:
+                    normalized["query"] = inferred_query
+            if not isinstance(normalized.get("max_results"), int):
+                normalized["max_results"] = Config.WEB_SEARCH_MAX_RESULTS
 
         try:
             definition = self.tool_registry.get(tool_name)
@@ -320,6 +389,64 @@ class AIService:
         if isinstance(topic, str) and topic.strip():
             return f"Create a content plan about {topic.strip()}."
         return None
+
+    @staticmethod
+    def _build_tool_activity_message(tool_name: str, tool_input: dict[str, Any]) -> str:
+        if tool_name == "web_search":
+            query = tool_input.get("query")
+            if isinstance(query, str) and query.strip():
+                return f"Searching web for: {AIService._truncate_text(query.strip(), 140)}"
+            return "Searching the web."
+        return f"Running {tool_name}."
+
+    @staticmethod
+    def _build_tool_result_message(tool_name: str, tool_result: Any) -> str:
+        if tool_name == "web_search":
+            result_count = tool_result.get("result_count") if isinstance(tool_result, dict) else None
+            if isinstance(result_count, int):
+                return f"Web search completed with {result_count} result{'s' if result_count != 1 else ''}."
+            return "Web search completed."
+        return f"{tool_name} completed."
+
+    @staticmethod
+    def _build_tool_failure_message(tool_name: str, error: str) -> str:
+        if tool_name == "web_search":
+            return f"Web search failed: {AIService._truncate_text(error, 180)}"
+        return f"{tool_name} failed."
+
+    @staticmethod
+    def _truncate_text(value: str, max_len: int) -> str:
+        if len(value) <= max_len:
+            return value
+        return f"{value[: max_len - 1]}..."
+
+    @staticmethod
+    def _normalize_uuid_text(value: Any) -> str | None:
+        if isinstance(value, UUID):
+            return str(value)
+        if isinstance(value, str):
+            candidate = value.strip()
+            if not candidate or candidate == AIService._REDACTED_TOKEN:
+                return None
+            try:
+                return str(UUID(candidate))
+            except ValueError:
+                return None
+        return None
+
+    @classmethod
+    def _sanitize_tool_payload(cls, value: Any) -> Any:
+        if isinstance(value, dict):
+            sanitized: dict[str, Any] = {}
+            for key, nested_value in value.items():
+                if key in cls._SENSITIVE_ID_FIELDS:
+                    sanitized[key] = cls._REDACTED_TOKEN
+                else:
+                    sanitized[key] = cls._sanitize_tool_payload(nested_value)
+            return sanitized
+        if isinstance(value, list):
+            return [cls._sanitize_tool_payload(item) for item in value]
+        return value
 
     def _build_recent_user_request(self, conversation_id: UUID) -> str | None:
         try:
@@ -347,6 +474,25 @@ class AIService:
                 self.db.execute(
                     select(ContentPlan.id)
                     .where(ContentPlan.conversation_id == conversation_id)
+                    .order_by(ContentPlan.updated_at.desc())
+                    .limit(1)
+                )
+                .scalar_one_or_none()
+            )
+        except Exception:
+            return None
+
+        return str(plan) if plan else None
+
+    def _infer_latest_executable_plan_id(self, conversation_id: UUID) -> str | None:
+        try:
+            plan = (
+                self.db.execute(
+                    select(ContentPlan.id)
+                    .where(
+                        ContentPlan.conversation_id == conversation_id,
+                        ContentPlan.status != "executed",
+                    )
                     .order_by(ContentPlan.updated_at.desc())
                     .limit(1)
                 )
@@ -584,3 +730,364 @@ class AIService:
         if not assistant_blocks:
             raise AICompletionError("Anthropic response did not include recognized content blocks.")
         return {"text": text, "tool_uses": tool_uses, "assistant_blocks": assistant_blocks}
+
+    def _maybe_autorun_intent_tool(
+        self,
+        conversation_id: UUID,
+        conversation_messages: list[dict[str, Any]],
+        preferred_plan_id: UUID | None,
+        tool_calls_log: list[dict[str, Any]],
+        tool_results_log: list[dict[str, Any]],
+        iteration: int,
+        assistant_text_hint: str | None = None,
+        event_callback: Callable[[str, dict[str, Any]], None] | None = None,
+    ) -> bool:
+        latest_user_text = self._extract_latest_user_text(conversation_messages)
+        tool_name = self._select_autorun_tool_name(latest_user_text)
+        if tool_name is None and self._should_autorun_create_plan_from_clarifications(
+            conversation_messages,
+            latest_user_text,
+            assistant_text_hint=assistant_text_hint,
+        ):
+            tool_name = "create_content_idea"
+        if tool_name is None:
+            return False
+        if self._has_completed_tool(tool_results_log, tool_name):
+            return False
+
+        seed_input = self._build_autorun_seed_input(tool_name, latest_user_text)
+        normalized_tool_input = self._normalize_tool_input(
+            tool_name=tool_name,
+            tool_input=seed_input,
+            conversation_id=conversation_id,
+            preferred_plan_id=preferred_plan_id,
+        )
+        if tool_name == "execute_plan" and "plan_id" not in normalized_tool_input:
+            return False
+        if tool_name == "create_content_idea" and not str(normalized_tool_input.get("user_request") or "").strip():
+            return False
+
+        tool_use_id = f"auto_{tool_name}_{iteration}"
+        if event_callback:
+            event_callback(
+                "agent.tools.detected",
+                {
+                    "conversation_id": str(conversation_id),
+                    "iteration": iteration,
+                    "count": 1,
+                },
+            )
+            event_callback(
+                "agent.tool.started",
+                {
+                    "conversation_id": str(conversation_id),
+                    "tool_use_id": tool_use_id,
+                    "tool_name": tool_name,
+                    "iteration": iteration,
+                    "activity_message": self._build_tool_activity_message(
+                        tool_name,
+                        normalized_tool_input,
+                    ),
+                },
+            )
+
+        tool_call_entry = {
+            "id": tool_use_id,
+            "name": tool_name,
+            "input": self._sanitize_tool_payload(normalized_tool_input),
+            "iteration": iteration,
+        }
+        tool_calls_log.append(tool_call_entry)
+
+        tool_status = "completed"
+        is_error = False
+        try:
+            execution = self.tool_router.execute(tool_name, normalized_tool_input)
+            tool_result_payload = execution["result"]
+            if event_callback:
+                event_callback(
+                    "agent.tool.completed",
+                    {
+                        "conversation_id": str(conversation_id),
+                        "tool_use_id": tool_use_id,
+                        "tool_name": tool_name,
+                        "iteration": iteration,
+                        "activity_message": self._build_tool_result_message(
+                            tool_name,
+                            tool_result_payload,
+                        ),
+                    },
+                )
+        except ToolExecutionError as exc:
+            tool_result_payload = {"error": str(exc)}
+            tool_status = "failed"
+            is_error = True
+            if event_callback:
+                event_callback(
+                    "agent.tool.failed",
+                    {
+                        "conversation_id": str(conversation_id),
+                        "tool_use_id": tool_use_id,
+                        "tool_name": tool_name,
+                        "iteration": iteration,
+                        "error": str(exc),
+                        "activity_message": self._build_tool_failure_message(tool_name, str(exc)),
+                    },
+                )
+
+        tool_result_entry = {
+            "tool_use_id": tool_use_id,
+            "name": tool_name,
+            "status": tool_status,
+            "result": self._sanitize_tool_payload(tool_result_payload),
+            "iteration": iteration,
+        }
+        tool_results_log.append(tool_result_entry)
+
+        tool_result_payload_for_model = self._sanitize_tool_payload(tool_result_payload)
+        result_block: dict[str, Any] = {
+            "type": "tool_result",
+            "tool_use_id": tool_use_id,
+            "content": json.dumps(tool_result_payload_for_model, default=str),
+        }
+        if is_error:
+            result_block["is_error"] = True
+
+        conversation_messages.append(
+            {
+                "role": "assistant",
+                "content": [
+                    {
+                        "type": "tool_use",
+                        "id": tool_use_id,
+                        "name": tool_name,
+                        "input": normalized_tool_input,
+                    }
+                ],
+            }
+        )
+        conversation_messages.append({"role": "user", "content": [result_block]})
+        return True
+
+    @staticmethod
+    def _has_completed_tool(tool_results_log: list[dict[str, Any]], tool_name: str) -> bool:
+        for item in tool_results_log:
+            if item.get("name") == tool_name and item.get("status") == "completed":
+                return True
+        return False
+
+    @staticmethod
+    def _build_autorun_seed_input(tool_name: str, latest_user_text: str) -> dict[str, Any]:
+        if tool_name == "create_content_idea":
+            return {"user_request": latest_user_text}
+        if tool_name == "web_search":
+            return {"query": latest_user_text}
+        return {}
+
+    @staticmethod
+    def _extract_latest_user_text(conversation_messages: list[dict[str, Any]]) -> str:
+        for message in reversed(conversation_messages):
+            if message.get("role") != "user":
+                continue
+            extracted = AIService._extract_message_text(message.get("content"))
+            if extracted:
+                return extracted
+        return ""
+
+    @staticmethod
+    def _extract_latest_assistant_text(conversation_messages: list[dict[str, Any]]) -> str:
+        for message in reversed(conversation_messages):
+            if message.get("role") != "assistant":
+                continue
+            extracted = AIService._extract_message_text(message.get("content"))
+            if extracted:
+                return extracted
+        return ""
+
+    @classmethod
+    def _extract_message_text(cls, content: Any) -> str:
+        if isinstance(content, str):
+            return content.strip()
+        if not isinstance(content, list):
+            return ""
+        text_blocks = [
+            str(block.get("text")).strip()
+            for block in content
+            if isinstance(block, dict) and block.get("type") == "text" and block.get("text")
+        ]
+        if text_blocks:
+            return "\n".join(text_blocks)
+        return ""
+
+    @classmethod
+    def _should_autorun_create_plan_from_clarifications(
+        cls,
+        conversation_messages: list[dict[str, Any]],
+        latest_user_text: str,
+        assistant_text_hint: str | None = None,
+    ) -> bool:
+        normalized_user_text = latest_user_text.lower().strip()
+        if not normalized_user_text:
+            return False
+        if cls._is_create_content_idea_intent(latest_user_text):
+            return False
+
+        latest_assistant_text = cls._extract_latest_assistant_text(conversation_messages)
+        normalized_assistant_text = latest_assistant_text.lower().strip()
+        if assistant_text_hint:
+            normalized_assistant_text = (
+                f"{normalized_assistant_text}\n{assistant_text_hint.lower().strip()}"
+                if normalized_assistant_text
+                else assistant_text_hint.lower().strip()
+            )
+        if not normalized_assistant_text:
+            return False
+        if not cls._looks_like_plan_clarification_prompt(normalized_assistant_text):
+            return False
+        if not cls._looks_like_plan_clarification_answer(normalized_user_text):
+            return False
+        if not cls._has_prior_blog_request_before_latest_assistant(conversation_messages):
+            return False
+        return True
+
+    @classmethod
+    def _has_prior_blog_request_before_latest_assistant(cls, conversation_messages: list[dict[str, Any]]) -> bool:
+        latest_assistant_index = None
+        for idx in range(len(conversation_messages) - 1, -1, -1):
+            if conversation_messages[idx].get("role") == "assistant":
+                latest_assistant_index = idx
+                break
+        if latest_assistant_index is None:
+            return False
+
+        for message in reversed(conversation_messages[:latest_assistant_index]):
+            if message.get("role") != "user":
+                continue
+            candidate_text = cls._extract_message_text(message.get("content"))
+            if cls._looks_like_blog_request(candidate_text):
+                return True
+        return False
+
+    @staticmethod
+    def _looks_like_plan_clarification_prompt(normalized_text: str) -> bool:
+        if not normalized_text:
+            return False
+        cues = (
+            "quick clarification",
+            "clarification",
+            "specific angle",
+            "target audience",
+            "blog goal",
+            "what aspect",
+            "once you provide",
+            "once you share",
+            "content plan",
+            "build the perfect",
+        )
+        matches = sum(1 for cue in cues if cue in normalized_text)
+        return matches >= 2
+
+    @staticmethod
+    def _looks_like_plan_clarification_answer(normalized_text: str) -> bool:
+        if not normalized_text:
+            return False
+        segments = [segment.strip() for segment in re.split(r"[\n,;|]+", normalized_text) if segment.strip()]
+        if len(segments) >= 2:
+            return True
+        cues = (
+            "target audience",
+            "audience",
+            "educate",
+            "inform",
+            "thought leadership",
+            "drive traffic",
+            "seo",
+            "angle",
+            "focus",
+            "goal",
+            "students",
+            "researchers",
+            "professionals",
+            "patients",
+        )
+        cue_hits = sum(1 for cue in cues if cue in normalized_text)
+        return cue_hits >= 2
+
+    @staticmethod
+    def _looks_like_blog_request(user_text: str) -> bool:
+        normalized = user_text.lower().strip()
+        if not normalized:
+            return False
+        has_blog_context = bool(re.search(r"\b(blog|article|post|content)\b", normalized))
+        has_request_verb = bool(re.search(r"\b(create|generate|write|draft|plan|outline|brainstorm|want|need)\b", normalized))
+        return has_blog_context and has_request_verb
+
+    @classmethod
+    def _select_autorun_tool_name(cls, user_text: str) -> str | None:
+        if cls._is_execute_intent(user_text):
+            return "execute_plan"
+        if cls._is_create_content_idea_intent(user_text):
+            return "create_content_idea"
+        if cls._is_web_search_intent(user_text):
+            return "web_search"
+        return None
+
+    @staticmethod
+    def _is_execute_intent(user_text: str) -> bool:
+        normalized = user_text.lower().strip()
+        if not normalized:
+            return False
+        if re.search(r"\b(don't|do not|not now|later)\b.*\b(execute|generate|write|create)\b", normalized):
+            return False
+        execute_patterns = (
+            r"\bexecute\b",
+            r"\bgenerate\b.*\b(full|complete)\b.*\b(blog|content|article|post)\b",
+            r"\bwrite\b.*\b(full|complete)\b.*\b(blog|article|post)\b",
+            r"\bcreate\b.*\b(full|complete)\b.*\b(blog|article|post)\b",
+            r"\bready to publish\b",
+        )
+        return any(re.search(pattern, normalized) for pattern in execute_patterns)
+
+    @staticmethod
+    def _is_create_content_idea_intent(user_text: str) -> bool:
+        normalized = user_text.lower().strip()
+        if not normalized:
+            return False
+        if re.search(r"\b(don't|do not|not now|later)\b.*\b(create|generate|make|build)\b", normalized):
+            return False
+
+        explicit_patterns = (
+            r"\b(create|generate|make|build|draft)\b.*\b(content\s+idea|plan|outline|blog\s+plan|article\s+plan)\b",
+            r"\bhelp me\b.*\b(plan|outline)\b",
+            r"\bbrainstorm\b.*\b(blog|article|post|idea)\b",
+        )
+        if any(re.search(pattern, normalized) for pattern in explicit_patterns):
+            return True
+
+        has_blog_context = bool(re.search(r"\b(blog|article|post|content)\b", normalized))
+        specification_cues = (
+            "target audience",
+            "audience",
+            "tone",
+            "style",
+            "focus",
+            "angle",
+            "word",
+            "length",
+            "keywords",
+        )
+        cue_count = sum(1 for cue in specification_cues if cue in normalized)
+        return has_blog_context and cue_count >= 2
+
+    @staticmethod
+    def _is_web_search_intent(user_text: str) -> bool:
+        normalized = user_text.lower().strip()
+        if not normalized:
+            return False
+        explicit_patterns = (
+            r"\b(search|look up|find)\b.*\b(web|internet|online)\b",
+            r"\bsearch\b.*\bfor\b",
+            r"\bwhat are\b.*\bcurrent trends\b",
+            r"\blatest\b.*\b(trends|news|updates|statistics|stats)\b",
+        )
+        return any(re.search(pattern, normalized) for pattern in explicit_patterns)

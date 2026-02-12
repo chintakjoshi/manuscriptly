@@ -5,6 +5,7 @@ export type ToolRun = {
   toolName: string;
   iteration: number;
   status: ToolRunStatus;
+  details?: string;
   error?: string;
 };
 
@@ -80,6 +81,7 @@ export function ToolActivityIndicator({ phase, summary, expectedToolCount, tools
                   <p className="text-sm font-medium text-slate-900">{tool.toolName}</p>
                   <span className={`rounded-md px-2 py-0.5 text-xs font-semibold ${badgeClass}`}>{tool.status}</span>
                 </div>
+                {tool.details && <p className="mt-1 text-xs text-slate-600">{tool.details}</p>}
                 {tool.error && <p className="mt-1 text-xs text-rose-700">{tool.error}</p>}
               </li>
             );
@@ -87,7 +89,7 @@ export function ToolActivityIndicator({ phase, summary, expectedToolCount, tools
         </ul>
       )}
 
-      {phase === "completed" && failedTools === 0 && (
+      {phase === "completed" && failedTools === 0 && totalTools > 0 && (
         <p className="mt-2 text-xs text-emerald-700">All tool calls completed successfully.</p>
       )}
       {failedTools > 0 && <p className="mt-2 text-xs text-rose-700">Some tool calls failed. Check details above.</p>}

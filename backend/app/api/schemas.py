@@ -114,3 +114,4 @@ class AgentChatRequest(BaseModel):
 
     conversation_id: UUID
     content: str = Field(min_length=1)
+    preferred_plan_id: UUID | None = None

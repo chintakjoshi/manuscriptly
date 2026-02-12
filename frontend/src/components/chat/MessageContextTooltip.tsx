@@ -1,0 +1,246 @@
+import { useEffect, useMemo, useRef, useState } from "react";
+
+type MessageContextTooltipProps = {
+  contextUsed: Record<string, unknown>;
+  messageId: string;
+};
+
+type ContextFact = {
+  label: string;
+  value: string;
+};
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+  return value as Record<string, unknown>;
+}
+
+function asString(value: unknown): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+  const trimmed = value.trim();
+  return trimmed ? trimmed : null;
+}
+
+function asNumber(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function formatValue(value: unknown): string | null {
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (!trimmed || trimmed.toLowerCase() === "unknown" || trimmed.toLowerCase() === "none") {
+      return null;
+    }
+    return trimmed;
+  }
+  if (typeof value === "number" || typeof value === "boolean") {
+    return String(value);
+  }
+  if (Array.isArray(value)) {
+    const parts = value
+      .map((item) => (typeof item === "string" ? item.trim() : String(item)))
+      .filter((item) => item);
+    return parts.length > 0 ? parts.join(", ") : null;
+  }
+  return null;
+}
+
+function getListStrings(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value
+    .map((entry) => (typeof entry === "string" ? entry.trim() : null))
+    .filter((entry): entry is string => Boolean(entry));
+}
+
+function getMemoryFacts(value: unknown): ContextFact[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value
+    .map((item) => {
+      const row = asRecord(item);
+      if (!row) {
+        return null;
+      }
+      const label = asString(row.label) ?? asString(row.field) ?? asString(row.fact);
+      const itemValue = formatValue(row.value);
+      if (!label || !itemValue) {
+        return null;
+      }
+      return { label, value: itemValue };
+    })
+    .filter((item): item is ContextFact => Boolean(item));
+}
+
+export function MessageContextTooltip({ contextUsed, messageId }: MessageContextTooltipProps) {
+  const [open, setOpen] = useState(false);
+  const containerRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+    const handlePointerDown = (event: MouseEvent) => {
+      if (!containerRef.current?.contains(event.target as Node)) {
+        setOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handlePointerDown);
+    return () => {
+      document.removeEventListener("mousedown", handlePointerDown);
+    };
+  }, [open]);
+
+  const provider = asString(contextUsed.provider);
+  const model = asString(contextUsed.model);
+  const toolCallsCount = asNumber(contextUsed.tool_calls_count) ?? 0;
+  const toolIterations = asNumber(contextUsed.tool_iterations);
+  const registeredTools = getListStrings(contextUsed.registered_tools);
+
+  const userContext = asRecord(contextUsed.user_context);
+  const memorySnapshot = asRecord(contextUsed.memory_snapshot);
+
+  const profileFacts = useMemo<ContextFact[]>(
+    () => [
+      { label: "User", value: formatValue(userContext?.user_name) ?? "" },
+      { label: "Company", value: formatValue(userContext?.company_name) ?? "" },
+      { label: "Industry", value: formatValue(userContext?.industry) ?? "" },
+      { label: "Audience", value: formatValue(userContext?.target_audience) ?? "" },
+      { label: "Voice", value: formatValue(userContext?.brand_voice) ?? "" },
+      { label: "Preferences", value: formatValue(userContext?.content_preferences) ?? "" },
+      { label: "Extra Context", value: formatValue(userContext?.additional_context) ?? "" },
+    ].filter((row) => row.value),
+    [userContext],
+  );
+
+  const knownProfileFacts = getMemoryFacts(memorySnapshot?.known_profile_fields);
+  const inferredFacts = getMemoryFacts(memorySnapshot?.inferred_facts);
+  const sessionIntents = getListStrings(memorySnapshot?.current_session_intents);
+  const crossSessionIntents = getListStrings(memorySnapshot?.cross_session_intents);
+
+  const influenceTags = [
+    profileFacts.length > 0 ? "Profile" : null,
+    knownProfileFacts.length + inferredFacts.length + sessionIntents.length + crossSessionIntents.length > 0 ? "Memory" : null,
+    toolCallsCount > 0 ? "Tools" : null,
+  ].filter((tag): tag is string => Boolean(tag));
+
+  return (
+    <div ref={containerRef} className="relative">
+      <button
+        type="button"
+        className="inline-flex items-center gap-1 rounded-md border border-indigo-200 bg-indigo-50 px-2 py-0.5 text-[11px] font-semibold text-indigo-700 hover:bg-indigo-100"
+        aria-expanded={open}
+        aria-controls={`context-popover-${messageId}`}
+        onClick={() => setOpen((previous) => !previous)}
+      >
+        <span className="relative inline-block h-3 w-3">
+          <span className="absolute left-0 top-0 h-1.5 w-1.5 rounded-full bg-indigo-500" />
+          <span className="absolute right-0 top-0 h-1.5 w-1.5 rounded-full bg-cyan-500" />
+          <span className="absolute left-0 bottom-0 h-1.5 w-1.5 rounded-full bg-cyan-500" />
+          <span className="absolute right-0 bottom-0 h-1.5 w-1.5 rounded-full bg-indigo-500" />
+        </span>
+        <span>Context DNA</span>
+      </button>
+
+      {open && (
+        <aside
+          id={`context-popover-${messageId}`}
+          className="absolute right-0 z-20 mt-2 w-[320px] max-w-[calc(100vw-3rem)] rounded-xl border border-slate-200 bg-white p-3 text-xs text-slate-700 shadow-lg"
+        >
+          <div className="flex items-start justify-between gap-2">
+            <p className="font-semibold text-slate-900">Response Context</p>
+            <button
+              type="button"
+              onClick={() => setOpen(false)}
+              className="rounded-md border border-slate-200 px-1.5 py-0.5 text-[10px] font-semibold text-slate-600 hover:bg-slate-50"
+            >
+              Close
+            </button>
+          </div>
+
+          {influenceTags.length > 0 && (
+            <div className="mt-2 flex flex-wrap gap-1">
+              {influenceTags.map((tag) => (
+                <span key={tag} className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-700">
+                  {tag}
+                </span>
+              ))}
+            </div>
+          )}
+
+          {(provider || model) && (
+            <p className="mt-2 text-[11px] text-slate-500">
+              {provider ?? "provider"}
+              {model ? ` - ${model}` : ""}
+            </p>
+          )}
+
+          {profileFacts.length > 0 && (
+            <section className="mt-3">
+              <p className="font-semibold text-slate-900">User Context Used</p>
+              <ul className="mt-1 space-y-1">
+                {profileFacts.map((fact) => (
+                  <li key={`profile-${fact.label}`}>
+                    <span className="font-medium text-slate-800">{fact.label}:</span> {fact.value}
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
+
+          {(knownProfileFacts.length > 0 || inferredFacts.length > 0) && (
+            <section className="mt-3">
+              <p className="font-semibold text-slate-900">Memory Signals</p>
+              <ul className="mt-1 space-y-1">
+                {knownProfileFacts.map((fact) => (
+                  <li key={`known-${fact.label}-${fact.value}`}>
+                    <span className="font-medium text-slate-800">{fact.label}:</span> {fact.value}
+                  </li>
+                ))}
+                {inferredFacts.map((fact) => (
+                  <li key={`inferred-${fact.label}-${fact.value}`}>
+                    <span className="font-medium text-slate-800">{fact.label}:</span> {fact.value}
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
+
+          {(sessionIntents.length > 0 || crossSessionIntents.length > 0) && (
+            <section className="mt-3">
+              <p className="font-semibold text-slate-900">Intent Memory</p>
+              <ul className="mt-1 space-y-1">
+                {sessionIntents.map((intent) => (
+                  <li key={`session-intent-${intent}`}>{intent}</li>
+                ))}
+                {crossSessionIntents.map((intent) => (
+                  <li key={`cross-intent-${intent}`}>{intent}</li>
+                ))}
+              </ul>
+            </section>
+          )}
+
+          <section className="mt-3 border-t border-slate-100 pt-2 text-[11px] text-slate-600">
+            <p>
+              Tool calls in this response: <span className="font-semibold text-slate-800">{toolCallsCount}</span>
+            </p>
+            {toolIterations ? (
+              <p>
+                Tool loop iterations: <span className="font-semibold text-slate-800">{toolIterations}</span>
+              </p>
+            ) : null}
+            {registeredTools.length > 0 ? (
+              <p className="mt-1">Available tools: {registeredTools.join(", ")}</p>
+            ) : null}
+          </section>
+        </aside>
+      )}
+    </div>
+  );
+}

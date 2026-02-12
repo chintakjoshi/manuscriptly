@@ -20,6 +20,17 @@ function formatDate(value: string): string {
   return date.toLocaleString();
 }
 
+function normalizeContentStatus(value: string): string {
+  const normalized = value.trim().toLowerCase();
+  if (!normalized) {
+    return "";
+  }
+  if (normalized === "fraft") {
+    return "draft";
+  }
+  return normalized;
+}
+
 export function ContentDisplay({
   contentItems,
   selectedContentId,
@@ -48,6 +59,7 @@ export function ContentDisplay({
   const [tags, setTags] = useState("");
   const [status, setStatus] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [saveNotice, setSaveNotice] = useState<string | null>(null);
 
   useEffect(() => {
     if (!selectedItem) {
@@ -64,6 +76,7 @@ export function ContentDisplay({
     setTags((selectedItem.tags ?? []).join(", "));
     setStatus(selectedItem.status);
     setError(null);
+    setSaveNotice(null);
   }, [selectedItem?.id]);
 
   if (contentItems.length === 0 || !selectedItem) {
@@ -76,20 +89,61 @@ export function ContentDisplay({
 
   const handleSave = async () => {
     setError(null);
+    setSaveNotice(null);
     const parsedTags = tags
       .split(",")
       .map((value) => value.trim())
       .filter(Boolean);
+    const normalizedStatus = normalizeContentStatus(status);
+    const selectedTags = selectedItem.tags ?? [];
+
+    const payload: ContentUpdateRequest = {
+      change_description: "Manual edit from content workspace.",
+    };
+
+    const nextTitle = title.trim();
+    if (nextTitle && nextTitle !== selectedItem.title) {
+      payload.title = nextTitle;
+    }
+
+    const nextContent = content.trim();
+    if (nextContent && nextContent !== selectedItem.content) {
+      payload.content = nextContent;
+    }
+
+    const nextMetaDescription = metaDescription.trim() || null;
+    if (nextMetaDescription !== (selectedItem.meta_description ?? null)) {
+      payload.meta_description = nextMetaDescription;
+    }
+
+    const tagsChanged =
+      parsedTags.length !== selectedTags.length ||
+      parsedTags.some((tag, index) => tag !== selectedTags[index]);
+    if (tagsChanged) {
+      payload.tags = parsedTags.length > 0 ? parsedTags : null;
+    }
+
+    if (normalizedStatus && normalizedStatus !== selectedItem.status) {
+      payload.status = normalizedStatus;
+    }
+
+    const hasChanges =
+      payload.title !== undefined ||
+      payload.content !== undefined ||
+      payload.meta_description !== undefined ||
+      payload.tags !== undefined ||
+      payload.status !== undefined;
+    if (!hasChanges) {
+      setSaveNotice("No changes to save.");
+      return;
+    }
 
     try {
-      await onSave(selectedItem.id, {
-        title: title.trim() || selectedItem.title,
-        content: content.trim() || selectedItem.content,
-        meta_description: metaDescription.trim() || null,
-        tags: parsedTags.length > 0 ? parsedTags : null,
-        status: status.trim() || selectedItem.status,
-        change_description: "Manual edit from content workspace.",
-      });
+      await onSave(selectedItem.id, payload);
+      setSaveNotice("Changes saved.");
+      if (payload.status) {
+        setStatus(payload.status);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to save content.");
     }
@@ -152,13 +206,19 @@ export function ContentDisplay({
           <input
             type="text"
             value={title}
-            onChange={(event) => setTitle(event.target.value)}
+            onChange={(event) => {
+              setTitle(event.target.value);
+              setSaveNotice(null);
+            }}
             className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm outline-none focus:border-slate-900"
             placeholder="Content title"
           />
           <textarea
             value={metaDescription}
-            onChange={(event) => setMetaDescription(event.target.value)}
+            onChange={(event) => {
+              setMetaDescription(event.target.value);
+              setSaveNotice(null);
+            }}
             rows={2}
             className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm outline-none focus:border-slate-900"
             placeholder="Meta description"
@@ -166,20 +226,29 @@ export function ContentDisplay({
           <input
             type="text"
             value={tags}
-            onChange={(event) => setTags(event.target.value)}
+            onChange={(event) => {
+              setTags(event.target.value);
+              setSaveNotice(null);
+            }}
             className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm outline-none focus:border-slate-900"
             placeholder="Tags (comma-separated)"
           />
           <input
             type="text"
             value={status}
-            onChange={(event) => setStatus(event.target.value)}
+            onChange={(event) => {
+              setStatus(event.target.value);
+              setSaveNotice(null);
+            }}
             className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm outline-none focus:border-slate-900"
             placeholder="Status"
           />
           <textarea
             value={content}
-            onChange={(event) => setContent(event.target.value)}
+            onChange={(event) => {
+              setContent(event.target.value);
+              setSaveNotice(null);
+            }}
             rows={16}
             className="w-full rounded-md border border-slate-300 px-3 py-2 font-mono text-xs leading-relaxed outline-none focus:border-slate-900"
             placeholder="Generated content"
@@ -205,6 +274,7 @@ export function ContentDisplay({
           </button>
         </div>
 
+        {saveNotice ? <p className="mt-3 rounded-md bg-emerald-100 px-3 py-2 text-xs text-emerald-700">{saveNotice}</p> : null}
         {error ? <p className="mt-3 rounded-md bg-rose-100 px-3 py-2 text-xs text-rose-700">{error}</p> : null}
       </article>
     </div>

@@ -167,6 +167,7 @@ export type StartSessionFromPlanResponse = {
 export type AgentChatRequest = {
   conversation_id: string;
   content: string;
+  preferred_plan_id?: string;
 };
 
 export type AgentChatResponse = {

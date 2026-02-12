@@ -14,6 +14,7 @@ from app.agent_tools import (
     ToolExecutionRouter,
     ToolInputValidationError,
     UpdateContentPlanInput,
+    WebSearchInput,
     build_default_tool_registry,
 )
 
@@ -47,6 +48,15 @@ class ToolSchemaValidationTests(unittest.TestCase):
                 }
             )
 
+    def test_web_search_requires_non_empty_query(self) -> None:
+        with self.assertRaises(ValidationError):
+            WebSearchInput.model_validate(
+                {
+                    "conversation_id": str(uuid4()),
+                    "query": "",
+                }
+            )
+
 
 class ToolRegistryAndRouterTests(unittest.TestCase):
     def test_default_registry_includes_expected_tools(self) -> None:
@@ -54,7 +64,7 @@ class ToolRegistryAndRouterTests(unittest.TestCase):
         names = [tool.name for tool in registry.list()]
         self.assertEqual(
             names,
-            ["create_content_idea", "update_content_plan", "execute_plan"],
+            ["create_content_idea", "update_content_plan", "execute_plan", "web_search"],
         )
 
     def test_router_rejects_invalid_tool_payload(self) -> None:
