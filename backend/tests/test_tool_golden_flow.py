@@ -7,7 +7,7 @@ from uuid import UUID, uuid4
 from app.agent_tools import ToolExecutionRouter
 from app.models import ContentPlan, Conversation
 
-from fakes import InMemoryDbSession
+from tests.fakes import InMemoryDbSession
 
 
 class ToolGoldenFlowTests(unittest.TestCase):

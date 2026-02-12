@@ -1,22 +1,72 @@
 # kaka-the-writer
 
-Local prototype for a content-writing agent.
+Local-first prototype for an agentic blog writing workspace.
 
-## Docker (PostgreSQL)
+## Overview
+
+The app pairs a chat interface with a dynamic workspace:
+- Left side: session-based chat with live agent/tool activity.
+- Right side: brainstorming plans and generated content drafts.
+- Backend agent: tool-calling loop (`create_content_idea`, `update_content_plan`, `execute_plan`, `web_search`).
+
+## Current Scope
+
+Implemented through Phase 10 Step 30 (Step 27 intentionally skipped).
+
+Highlights:
+- Onboarding + user/company context memory.
+- Session management and persistent message history.
+- Tool-driven planning + execution flow.
+- SSE live events for chat and tool execution state.
+- Manual plan/content edits and delete flows.
+- Markdown preview, syntax highlighting, copy, and export (`.md`, `.txt`).
+- Web search tool integration.
+- Automated test coverage for golden flow, route behavior, SSE isolation, and end-to-end journey.
+
+## Tech Stack
+
+- Frontend: React + TypeScript + Vite + Tailwind CSS
+- Backend: Flask + SQLAlchemy + Alembic + Pydantic + Anthropic SDK
+- Database: PostgreSQL
+
+## Prerequisites
+
+- Python 3.11+
+- Node.js 20+
+- Docker Desktop (optional, recommended)
+- PostgreSQL 16+ (only for local non-Docker workflow)
+
+## Environment Setup
+
+### Backend env
 
 ```powershell
-docker compose up -d postgres
-docker compose ps
+cd backend
+copy .env.example .env
 ```
 
-PostgreSQL is exposed at `localhost:5432` with:
-- user: `postgres`
-- password: `postgres`
-- database: `kaka_writer`
+Required for AI replies:
+- Set `ANTHROPIC_API_KEY` in `backend/.env`
 
-## Docker (Full App)
+Key backend env values:
+- `DATABASE_URL`
+- `CORS_ORIGINS`
+- `ANTHROPIC_MODEL`
+- `WEB_SEARCH_MAX_RESULTS`
 
-Run backend + frontend + postgres:
+### Frontend env
+
+```powershell
+cd frontend
+copy .env.example .env
+```
+
+Key frontend env values:
+- `VITE_API_BASE_URL` (default: `http://localhost:8000`)
+
+## Run with Docker (Recommended)
+
+From repo root:
 
 ```powershell
 docker compose up -d --build
@@ -31,86 +81,101 @@ Services:
 - Adminer: `http://localhost:8080`
 - SSE stream: `http://localhost:8000/api/v1/stream`
 
-Adminer login values:
-- System: `PostgreSQL`
-- Server: `postgres`
-- Username: `postgres`
-- Password: `postgres`
-- Database: `kaka_writer`
+Default Postgres credentials:
+- user: `postgres`
+- password: `postgres`
+- database: `kaka_writer`
 
-Default superuser (seeded once on first boot when `users` table is empty):
-- user name: `admin`
-- email: `admin@example.com`
-- password: `admin123`
-
-You can override with backend env vars:
-- `SEED_DEFAULT_SUPERUSER`
-- `DEFAULT_SUPERUSER_USER_NAME`
-- `DEFAULT_SUPERUSER_EMAIL`
-- `DEFAULT_SUPERUSER_PASSWORD`
-
-SSE quick test:
-1. Open frontend at `http://localhost:5173` and confirm stream status is connected.
-2. Click `Send Test Event` in the UI.
-3. Or trigger directly:
-   `POST http://localhost:8000/api/v1/stream/test` with JSON body `{"message":"hello"}`.
-
-Message history endpoints:
-- `GET /api/v1/sessions/{session_id}/messages` (full stored messages)
-- `GET /api/v1/sessions/{session_id}/history?format=model` (role/content for agent context)
-- `GET /api/v1/sessions/{session_id}/history?format=transcript` (User/Assistant text transcript)
-- `POST /api/v1/agent/chat` (store user message + generate assistant reply via Anthropic)
-
-Anthropic env vars:
-- `ANTHROPIC_API_KEY` (required for AI replies)
-- `ANTHROPIC_MODEL` (default `claude-haiku-4-5-20251001`)
-- `ANTHROPIC_MAX_TOKENS` (default `1024`)
-- `ANTHROPIC_TEMPERATURE` (default `0.4`)
-
-Stop everything:
+Stop services:
 
 ```powershell
 docker compose down
 ```
 
-Reset database volume:
+Reset DB volume:
 
 ```powershell
 docker compose down -v
 ```
 
-## Phase 1 Setup
+## Run Locally (Without Docker)
 
-### Backend (Flask)
+## 1) Start PostgreSQL
+
+Create DB `kaka_writer` and confirm `backend/.env` `DATABASE_URL` points to it.
+
+## 2) Start backend
 
 ```powershell
 cd backend
 python -m venv venv
 .\venv\Scripts\Activate.ps1
 pip install -r requirements.txt
-copy .env.example .env
+alembic upgrade head
 python run.py
 ```
 
-Backend runs at `http://localhost:8000`.
-
-### Frontend (React + Vite + Tailwind)
+## 3) Start frontend
 
 ```powershell
 cd frontend
 npm install
-copy .env.example .env
 npm run dev
 ```
 
-Frontend runs at `http://localhost:5173`.
+## Testing
 
-## Migrations (Alembic)
+### Backend tests
 
 ```powershell
 cd backend
-.\venv\Scripts\Activate.ps1
-alembic upgrade head
+python -m unittest discover -s tests -p "test_*.py"
 ```
-email: swagger@example.com
-user_id: d9b58891-5f45-469c-a701-d460f3c1c8c1
+
+### Frontend build check
+
+```powershell
+cd frontend
+npm run build
+```
+
+## Useful Endpoints
+
+- `POST /api/v1/users/onboarding`
+- `GET /api/v1/users/{user_id}`
+- `POST /api/v1/sessions`
+- `GET /api/v1/sessions`
+- `GET /api/v1/sessions/{session_id}/messages`
+- `POST /api/v1/agent/chat`
+- `GET /api/v1/plans`
+- `PATCH /api/v1/plans/{plan_id}`
+- `DELETE /api/v1/plans/{plan_id}`
+- `GET /api/v1/content`
+- `PATCH /api/v1/content/{content_item_id}`
+- `GET /api/v1/stream`
+- `POST /api/v1/stream/test`
+
+## Project Structure
+
+```text
+backend/
+  app/
+    api/routes/        # Flask route modules
+    agent_tools/       # Tool schemas, registry, handlers
+    services/          # AI, memory, message, web search services
+    core/              # config, bootstrap, SSE manager
+    models/            # SQLAlchemy entities
+    db/                # DB session factory
+  alembic/             # migrations
+  tests/               # backend test suite
+frontend/
+  src/
+    components/        # chat, session, workspace UI
+    lib/               # API + SSE client helpers
+```
+
+## Notes
+
+- This is a local development prototype.
+- No production deployment hardening is included.
+- The focus is golden-flow reliability, testability, and developer ergonomics.
