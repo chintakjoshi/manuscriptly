@@ -48,3 +48,11 @@ class ExecutePlanInput(BaseModel):
     plan_id: UUID
     writing_instructions: str | None = Field(default=None, min_length=1, max_length=4000)
     output_format: str = Field(default="markdown", min_length=1, max_length=50)
+
+
+class WebSearchInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    conversation_id: UUID
+    query: str = Field(min_length=1, max_length=500)
+    max_results: int = Field(default=5, ge=1, le=10)

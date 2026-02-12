@@ -7,11 +7,12 @@ from pydantic import ValidationError
 from app.agent_tools.handlers import (
     handle_create_content_idea,
     handle_execute_plan,
+    handle_web_search,
     handle_update_content_plan,
     ToolHandlerError,
 )
 from app.agent_tools.registry import ToolDefinition, ToolNotRegisteredError, ToolRegistry
-from app.agent_tools.schemas import CreateContentIdeaInput, ExecutePlanInput, UpdateContentPlanInput
+from app.agent_tools.schemas import CreateContentIdeaInput, ExecutePlanInput, UpdateContentPlanInput, WebSearchInput
 
 
 class ToolExecutionError(Exception):
@@ -67,6 +68,17 @@ def build_default_tool_registry() -> ToolRegistry:
             description="Generate full blog content from an approved plan. Pass plan_id and optional instructions.",
             input_model=ExecutePlanInput,
             handler=handle_execute_plan,
+        )
+    )
+    registry.register(
+        ToolDefinition(
+            name="web_search",
+            description=(
+                "Search the web for current facts, trends, and references. "
+                "Pass query and optional max_results."
+            ),
+            input_model=WebSearchInput,
+            handler=handle_web_search,
         )
     )
     return registry

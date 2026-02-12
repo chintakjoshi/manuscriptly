@@ -1,3 +1,5 @@
+@import "highlight.js/styles/github.css";
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -14,4 +16,74 @@
 
 body {
   margin: 0;
+}
+
+.markdown-preview h1,
+.markdown-preview h2,
+.markdown-preview h3,
+.markdown-preview h4 {
+  color: #0f172a;
+  font-weight: 700;
+  line-height: 1.2;
+  margin-top: 1.1rem;
+  margin-bottom: 0.55rem;
+}
+
+.markdown-preview h1 {
+  font-size: 1.5rem;
+}
+
+.markdown-preview h2 {
+  font-size: 1.25rem;
+}
+
+.markdown-preview h3 {
+  font-size: 1.1rem;
+}
+
+.markdown-preview p {
+  margin: 0.55rem 0;
+  line-height: 1.65;
+}
+
+.markdown-preview ul,
+.markdown-preview ol {
+  margin: 0.55rem 0;
+  padding-left: 1.25rem;
+}
+
+.markdown-preview li {
+  margin: 0.2rem 0;
+}
+
+.markdown-preview blockquote {
+  margin: 0.75rem 0;
+  border-left: 3px solid #94a3b8;
+  padding-left: 0.75rem;
+  color: #475569;
+}
+
+.markdown-preview a {
+  color: #0369a1;
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+}
+
+.markdown-preview pre {
+  border-radius: 0.5rem;
+  margin: 0.75rem 0;
+  overflow-x: auto;
+  padding: 0.85rem;
+}
+
+.markdown-preview code {
+  border-radius: 0.35rem;
+  background-color: #e2e8f0;
+  padding: 0.1rem 0.35rem;
+  font-size: 0.83em;
+}
+
+.markdown-preview pre code {
+  background-color: transparent;
+  padding: 0;
 }

@@ -16,12 +16,13 @@ from app.agent_tools.router import (
     ToolInputValidationError,
     build_default_tool_registry,
 )
-from app.agent_tools.schemas import CreateContentIdeaInput, ExecutePlanInput, UpdateContentPlanInput
+from app.agent_tools.schemas import CreateContentIdeaInput, ExecutePlanInput, UpdateContentPlanInput, WebSearchInput
 
 __all__ = [
     "CreateContentIdeaInput",
     "UpdateContentPlanInput",
     "ExecutePlanInput",
+    "WebSearchInput",
     "ToolDefinition",
     "ToolRegistry",
     "ToolRegistryError",

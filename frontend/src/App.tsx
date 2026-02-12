@@ -127,6 +127,7 @@ function upsertToolRun(
     toolName: string;
     iteration: number;
     status: ToolRun["status"];
+    details?: string;
     error?: string;
   },
 ): ToolRun[] {
@@ -136,6 +137,7 @@ function upsertToolRun(
     toolName: next.toolName,
     iteration: next.iteration,
     status: next.status,
+    details: next.details,
     error: next.error,
   };
 
@@ -148,20 +150,31 @@ function upsertToolRun(
   return updated;
 }
 
+function getToolActivityMessage(data: Record<string, unknown> | null): string | undefined {
+  if (!data) {
+    return undefined;
+  }
+  const message = data.activity_message;
+  if (typeof message !== "string") {
+    return undefined;
+  }
+  const trimmed = message.trim();
+  return trimmed || undefined;
+}
+
 function buildExecutePlanRequestMessage(
   params: {
-    planId: string;
     planTitle: string;
     researchNotes: string | null;
     writingInstructions?: string | null;
   },
 ): string {
-  const { planId, planTitle, researchNotes, writingInstructions } = params;
+  const { planTitle, researchNotes, writingInstructions } = params;
   const normalizedNotes = researchNotes?.trim() || "None provided.";
   const instructions = writingInstructions?.trim();
   const lines = [
     "Execute the approved plan and generate the full blog now.",
-    `Use execute_plan with this exact plan_id: ${planId}`,
+    "Use execute_plan for the current session's approved plan.",
     `Plan title: ${planTitle}`,
     `Research focus: ${normalizedNotes}`,
     "Output format: markdown.",
@@ -314,7 +327,11 @@ export default function App() {
     }
   };
 
-  const refreshContentItems = async (sessionId: string, showLoading = false) => {
+  const refreshContentItems = async (
+    sessionId: string,
+    showLoading = false,
+    options?: { selectNewest?: boolean },
+  ) => {
     if (!sessionId || !isValidPersistedSessionId(sessionId)) {
       setContentItems([]);
       setSelectedContentId(null);
@@ -328,6 +345,9 @@ export default function App() {
       const response = await listContentItems({ conversationId: sessionId });
       setContentItems(response.items);
       setSelectedContentId((current) => {
+        if (options?.selectNewest) {
+          return response.items[0]?.id ?? null;
+        }
         if (current && response.items.some((item) => item.id === current)) {
           return current;
         }
@@ -615,6 +635,7 @@ export default function App() {
       if (incomingEvent.event === "agent.tool.started") {
         const data = asRecord(incomingEvent.data);
         const toolName = typeof data?.tool_name === "string" ? data.tool_name : "unknown";
+        const activityMessage = getToolActivityMessage(data);
         const toolUseId =
           typeof data?.tool_use_id === "string" ? data.tool_use_id : `${toolName}-${String(Date.now())}`;
         const iteration = typeof data?.iteration === "number" ? data.iteration : 1;
@@ -625,15 +646,17 @@ export default function App() {
             toolName,
             iteration,
             status: "running",
+            details: activityMessage,
           }),
         );
-        setAgentState(`Running tool: ${toolName}`);
+        setAgentState(activityMessage ?? `Running tool: ${toolName}`);
         return;
       }
 
       if (incomingEvent.event === "agent.tool.completed") {
         const data = asRecord(incomingEvent.data);
         const toolName = typeof data?.tool_name === "string" ? data.tool_name : "unknown";
+        const activityMessage = getToolActivityMessage(data);
         const toolUseId =
           typeof data?.tool_use_id === "string" ? data.tool_use_id : `${toolName}-${String(Date.now())}`;
         const iteration = typeof data?.iteration === "number" ? data.iteration : 1;
@@ -643,9 +666,10 @@ export default function App() {
             toolName,
             iteration,
             status: "completed",
+            details: activityMessage,
           }),
         );
-        setAgentState(`Tool completed: ${toolName}`);
+        setAgentState(activityMessage ?? `Tool completed: ${toolName}`);
         if (toolName === "create_content_idea" && userContext?.id) {
           void refreshPlans(activeSessionId);
           void refreshIdeaPlans(userContext.id);
@@ -655,7 +679,7 @@ export default function App() {
           setExecutingPlanId(null);
           setRegeneratingContentId(null);
           void refreshPlans(activeSessionId);
-          void refreshContentItems(activeSessionId);
+          void refreshContentItems(activeSessionId, false, { selectNewest: true });
         }
         return;
       }
@@ -664,6 +688,7 @@ export default function App() {
         const data = asRecord(incomingEvent.data);
         const toolName = typeof data?.tool_name === "string" ? data.tool_name : "unknown";
         const error = typeof data?.error === "string" ? data.error : "Tool failed.";
+        const activityMessage = getToolActivityMessage(data);
         const toolUseId =
           typeof data?.tool_use_id === "string" ? data.tool_use_id : `${toolName}-${String(Date.now())}`;
         const iteration = typeof data?.iteration === "number" ? data.iteration : 1;
@@ -674,15 +699,24 @@ export default function App() {
             toolName,
             iteration,
             status: "failed",
+            details: activityMessage,
             error,
           }),
         );
-        setAgentState(`Tool failed: ${toolName}`);
+        setAgentState(activityMessage ?? `Tool failed: ${toolName}`);
         return;
       }
 
       if (incomingEvent.event === "agent.response.completed") {
-        setToolActivityPhase((previous) => (previous === "failed" ? "failed" : "completed"));
+        setToolActivityPhase((previous) => {
+          if (previous === "failed") {
+            return "failed";
+          }
+          if (previous === "tools") {
+            return "completed";
+          }
+          return "idle";
+        });
         setAgentState("Idle");
         return;
       }
@@ -780,7 +814,14 @@ export default function App() {
     }
   };
 
-  const sendMessageToAgent = async (content: string, options?: { switchToContentOnSuccess?: boolean }) => {
+  const sendMessageToAgent = async (
+    content: string,
+    options?: {
+      switchToContentOnSuccess?: boolean;
+      preferredPlanId?: string;
+      selectNewestContentOnSuccess?: boolean;
+    },
+  ) => {
     if (!activeSessionId || !isValidPersistedSessionId(activeSessionId)) {
       setErrorMessage("Session is still being created. Please wait a moment and retry.");
       return;
@@ -809,6 +850,7 @@ export default function App() {
       const response = await sendAgentChat({
         conversation_id: activeSessionId,
         content,
+        preferred_plan_id: options?.preferredPlanId,
       });
 
       setMessages((previous) => {
@@ -816,7 +858,9 @@ export default function App() {
         return mergeMessages(withoutOptimistic, [response.user_message, response.assistant_message]);
       });
       await refreshPlans(activeSessionId);
-      await refreshContentItems(activeSessionId);
+      await refreshContentItems(activeSessionId, false, {
+        selectNewest: options?.selectNewestContentOnSuccess,
+      });
       if (userContext?.id) {
         await refreshIdeaPlans(userContext.id);
       }
@@ -848,11 +892,14 @@ export default function App() {
     try {
       await sendMessageToAgent(
         buildExecutePlanRequestMessage({
-          planId: plan.id,
           planTitle: plan.title,
           researchNotes: plan.research_notes,
         }),
-        { switchToContentOnSuccess: true },
+        {
+          switchToContentOnSuccess: true,
+          preferredPlanId: plan.id,
+          selectNewestContentOnSuccess: true,
+        },
       );
     } finally {
       setExecutingPlanId((current) => (current === plan.id ? null : current));
@@ -899,16 +946,23 @@ export default function App() {
     if (!item) {
       throw new Error("Content item not found in current session.");
     }
+    const sourcePlan = plans.find((plan) => plan.id === item.content_plan_id);
+    if (!sourcePlan) {
+      throw new Error("Associated plan not found for this content item.");
+    }
     setRegeneratingContentId(contentItemId);
     try {
       await sendMessageToAgent(
         buildExecutePlanRequestMessage({
-          planId: item.content_plan_id,
-          planTitle: item.title,
-          researchNotes: item.meta_description,
+          planTitle: sourcePlan.title,
+          researchNotes: sourcePlan.research_notes,
           writingInstructions,
         }),
-        { switchToContentOnSuccess: true },
+        {
+          switchToContentOnSuccess: true,
+          preferredPlanId: sourcePlan.id,
+          selectNewestContentOnSuccess: true,
+        },
       );
     } finally {
       setRegeneratingContentId((current) => (current === contentItemId ? null : current));

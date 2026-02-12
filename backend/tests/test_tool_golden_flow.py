@@ -92,6 +92,61 @@ class ToolGoldenFlowTests(unittest.TestCase):
         self.assertEqual(persisted_plan.status, "executed")
         self.assertEqual(persisted_plan.title, "AI Content Strategy Playbook (Updated)")
 
+    @patch("app.agent_tools.handlers.WebSearchService.search")
+    @patch("app.agent_tools.handlers.SessionLocal")
+    def test_router_executes_web_search_tool(
+        self,
+        session_local_mock,
+        web_search_mock,
+    ) -> None:
+        db = InMemoryDbSession()
+        conversation = Conversation(
+            id=uuid4(),
+            user_id=uuid4(),
+            title="Research session",
+            status="active",
+        )
+        db.add(conversation)
+        session_local_mock.return_value = db
+        web_search_mock.return_value = {
+            "status": "success",
+            "engine": "duckduckgo",
+            "query": "latest AI content marketing trends 2026",
+            "result_count": 2,
+            "results": [
+                {
+                    "title": "Trends report",
+                    "snippet": "A summary of current trends.",
+                    "url": "https://example.com/report",
+                    "source": "Example",
+                },
+                {
+                    "title": "Industry analysis",
+                    "snippet": "Deep dive into AI writing patterns.",
+                    "url": "https://example.com/analysis",
+                    "source": "Example",
+                },
+            ],
+        }
+
+        router = ToolExecutionRouter()
+        response = router.execute(
+            "web_search",
+            {
+                "conversation_id": str(conversation.id),
+                "query": "latest AI content marketing trends 2026",
+                "max_results": 2,
+            },
+        )
+
+        self.assertEqual(response["tool_name"], "web_search")
+        self.assertEqual(response["result"]["status"], "success")
+        self.assertEqual(response["result"]["result_count"], 2)
+        self.assertEqual(len(response["result"]["results"]), 2)
+        web_search_mock.assert_called_once_with("latest AI content marketing trends 2026", 2)
+        self.assertEqual(len(db.tool_executions), 1)
+        self.assertEqual(db.tool_executions[0].tool_name, "web_search")
+
 
 if __name__ == "__main__":
     unittest.main()

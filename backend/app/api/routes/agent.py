@@ -97,6 +97,7 @@ def chat_with_agent():
             assistant_text, context_used, tool_calls, tool_results = ai_service.generate_assistant_reply(
                 body.conversation_id,
                 event_callback=emit_agent_event,
+                preferred_plan_id=body.preferred_plan_id,
             )
         except ConversationNotFoundError as exc:
             return error_response(str(exc), 404)
