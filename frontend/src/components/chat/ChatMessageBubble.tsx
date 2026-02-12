@@ -1,4 +1,6 @@
 import type { MessageDto } from "../../lib/api";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { MessageContextTooltip } from "./MessageContextTooltip";
 
 type ChatMessageBubbleProps = {
@@ -9,21 +11,27 @@ export function ChatMessageBubble({ message }: ChatMessageBubbleProps) {
   const isUser = message.role === "user";
   const contextUsed = !isUser && message.context_used ? message.context_used : null;
   const wrapperClasses = isUser ? "justify-end" : "justify-start";
+  const sizeClasses = isUser ? "max-w-[90%]" : "w-full max-w-none";
   const bubbleClasses = isUser
-    ? "bg-slate-900 text-white border-slate-900"
-    : "bg-white text-slate-900 border-slate-200";
-  const label = isUser ? "You" : "Kaka Writer";
+    ? "bg-[var(--app-bg-soft)] text-[var(--text-primary)]"
+    : "bg-black text-white";
+  const messageTextClasses = isUser ? "text-[var(--text-secondary)]" : "text-[#f0f0f0]";
 
   return (
-    <li className={`flex ${wrapperClasses}`}>
-      <article className={`max-w-[90%] rounded-xl border px-4 py-3 shadow-sm sm:max-w-[80%] ${bubbleClasses}`}>
-        <div className="flex items-center justify-between gap-2">
-          <div className={`text-[11px] font-semibold uppercase tracking-wide ${isUser ? "text-slate-200" : "text-slate-500"}`}>
-            {label}
+    <li className={`fade-slide-in flex w-full ${wrapperClasses}`}>
+      <article className={`${sizeClasses} rounded-2xl px-4 py-3 ${bubbleClasses}`}>
+        {contextUsed ? (
+          <div className="mb-1 flex justify-end">
+            <MessageContextTooltip contextUsed={contextUsed} messageId={message.id} />
           </div>
-          {contextUsed ? <MessageContextTooltip contextUsed={contextUsed} messageId={message.id} /> : null}
-        </div>
-        <p className="mt-1 whitespace-pre-wrap text-sm leading-relaxed">{message.content}</p>
+        ) : null}
+        {isUser ? (
+          <p className={`whitespace-pre-wrap text-[14px] leading-6 ${messageTextClasses}`}>{message.content}</p>
+        ) : (
+          <div className="markdown-preview chat-markdown text-[14px] leading-6 text-[#f0f0f0]">
+            <ReactMarkdown remarkPlugins={[remarkGfm]}>{message.content}</ReactMarkdown>
+          </div>
+        )}
       </article>
     </li>
   );

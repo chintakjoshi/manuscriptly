@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent } from "react";
 
 import { ChatInput } from "./components/chat/ChatInput";
 import { ChatMessageList } from "./components/chat/ChatMessageList";
@@ -44,6 +44,12 @@ const USER_ID_STORAGE_KEY = "kaka_writer_user_id";
 const TEMP_SESSION_ID_PREFIX = "temp-session-";
 const UUID_V4_LIKE_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const DEFAULT_WORKSPACE_WIDTH = 390;
+const MIN_WORKSPACE_WIDTH = 280;
+const MIN_CHAT_WIDTH = 420;
+const HIDE_WORKSPACE_BUTTON_MIN_WIDTH = 360;
+const TOOL_ACTIVITY_SUCCESS_AUTO_HIDE_MS = 3200;
+const TOOL_ACTIVITY_FADE_OUT_MS = 320;
 
 function isTemporarySessionId(sessionId: string): boolean {
   return sessionId.startsWith(TEMP_SESSION_ID_PREFIX);
@@ -62,6 +68,20 @@ function mergeMessages(existing: MessageDto[], incoming: MessageDto[]): MessageD
     byId.set(message.id, message);
   }
   return Array.from(byId.values()).sort((a, b) => a.created_at.localeCompare(b.created_at));
+}
+
+function normalizeMessageContent(content: string): string {
+  return content.replace(/\s+/g, " ").trim();
+}
+
+function isMatchingOptimisticUserMessage(message: MessageDto, incomingMessage: MessageDto): boolean {
+  return (
+    incomingMessage.role === "user" &&
+    message.role === "user" &&
+    message.id.startsWith("local-") &&
+    message.conversation_id === incomingMessage.conversation_id &&
+    normalizeMessageContent(message.content) === normalizeMessageContent(incomingMessage.content)
+  );
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -237,6 +257,8 @@ export default function App() {
   const [toolActivityPhase, setToolActivityPhase] = useState<ToolActivityPhase>("idle");
   const [toolRuns, setToolRuns] = useState<ToolRun[]>([]);
   const [expectedToolCount, setExpectedToolCount] = useState(0);
+  const [isToolActivityVisible, setIsToolActivityVisible] = useState(false);
+  const [isToolActivityFading, setIsToolActivityFading] = useState(false);
   const [loadingSessions, setLoadingSessions] = useState(true);
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [loadingPlans, setLoadingPlans] = useState(false);
@@ -253,6 +275,13 @@ export default function App() {
   const [executingPlanId, setExecutingPlanId] = useState<string | null>(null);
   const [startingSessionPlanId, setStartingSessionPlanId] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [isSessionsCollapsed, setIsSessionsCollapsed] = useState(false);
+  const [isWorkspaceCollapsed, setIsWorkspaceCollapsed] = useState(true);
+  const [workspaceWidth, setWorkspaceWidth] = useState(DEFAULT_WORKSPACE_WIDTH);
+  const [isResizingWorkspace, setIsResizingWorkspace] = useState(false);
+  const [isBrainstormSectionCollapsed, setIsBrainstormSectionCollapsed] = useState(true);
+  const [isSessionPlansSectionCollapsed, setIsSessionPlansSectionCollapsed] = useState(true);
+  const shellRef = useRef<HTMLDivElement | null>(null);
 
   const activeSession = useMemo(
     () => sessions.find((session) => session.id === activeSessionId) ?? null,
@@ -268,6 +297,11 @@ export default function App() {
   const isAgentThinking = useMemo(
     () => isSending || toolActivityPhase === "thinking" || toolActivityPhase === "tools",
     [isSending, toolActivityPhase],
+  );
+  const hasFailedToolRun = useMemo(() => toolRuns.some((tool) => tool.status === "failed"), [toolRuns]);
+  const shouldAutoHideToolActivity = useMemo(
+    () => toolActivityPhase === "completed" && !hasFailedToolRun && Math.max(expectedToolCount, toolRuns.length) > 0,
+    [expectedToolCount, hasFailedToolRun, toolActivityPhase, toolRuns.length],
   );
   const toolActivitySummary = useMemo(() => {
     const failedCount = toolRuns.filter((tool) => tool.status === "failed").length;
@@ -285,6 +319,42 @@ export default function App() {
     }
     return "Idle";
   }, [agentState, toolActivityPhase, toolRuns]);
+
+  useEffect(() => {
+    if (toolActivityPhase === "idle" && toolRuns.length === 0) {
+      setIsToolActivityVisible(false);
+      setIsToolActivityFading(false);
+      return;
+    }
+    setIsToolActivityVisible(true);
+    if (toolActivityPhase !== "completed") {
+      setIsToolActivityFading(false);
+    }
+  }, [toolActivityPhase, toolRuns.length]);
+
+  useEffect(() => {
+    if (!isToolActivityVisible || !shouldAutoHideToolActivity) {
+      return;
+    }
+
+    const fadeTimer = window.setTimeout(() => {
+      setIsToolActivityFading(true);
+    }, TOOL_ACTIVITY_SUCCESS_AUTO_HIDE_MS);
+
+    const hideTimer = window.setTimeout(() => {
+      setIsToolActivityVisible(false);
+      setIsToolActivityFading(false);
+      setToolActivityPhase("idle");
+      setToolRuns([]);
+      setExpectedToolCount(0);
+      setAgentState("Idle");
+    }, TOOL_ACTIVITY_SUCCESS_AUTO_HIDE_MS + TOOL_ACTIVITY_FADE_OUT_MS);
+
+    return () => {
+      window.clearTimeout(fadeTimer);
+      window.clearTimeout(hideTimer);
+    };
+  }, [isToolActivityVisible, shouldAutoHideToolActivity]);
 
   const refreshPlans = async (sessionId: string, showLoading = false) => {
     if (!isValidPersistedSessionId(sessionId)) {
@@ -549,6 +619,8 @@ export default function App() {
       setExpectedToolCount(0);
       setToolActivityPhase("idle");
       setAgentState("Idle");
+      setIsToolActivityVisible(false);
+      setIsToolActivityFading(false);
       setLoadingMessages(false);
       setLoadingPlans(false);
       setLoadingContentItems(false);
@@ -559,6 +631,8 @@ export default function App() {
     setExpectedToolCount(0);
     setToolActivityPhase("idle");
     setAgentState("Idle");
+    setIsToolActivityVisible(false);
+    setIsToolActivityFading(false);
     void loadSessionArtifacts(activeSessionId, true);
   }, [activeSessionId]);
 
@@ -570,7 +644,7 @@ export default function App() {
       return;
     }
     setStreamStatus("connecting");
-    setStreamNotice("Connecting live updates...");
+    setStreamNotice(null);
 
     const { disconnect } = connectLiveStream((incomingEvent) => {
       if (incomingEvent.event === "stream.connected" || incomingEvent.event === "connected") {
@@ -603,7 +677,13 @@ export default function App() {
       if (incomingEvent.event === "message.created") {
         const incomingMessage = asMessageDto(incomingEvent.data);
         if (incomingMessage && incomingMessage.conversation_id === activeSessionId) {
-          setMessages((previous) => mergeMessages(previous, [incomingMessage]));
+          setMessages((previous) => {
+            const reconciled =
+              incomingMessage.role === "user"
+                ? previous.filter((message) => !isMatchingOptimisticUserMessage(message, incomingMessage))
+                : previous;
+            return mergeMessages(reconciled, [incomingMessage]);
+          });
           if (incomingMessage.role === "assistant") {
             void refreshPlans(activeSessionId);
             void refreshContentItems(activeSessionId);
@@ -867,6 +947,18 @@ export default function App() {
       if (options?.switchToContentOnSuccess) {
         setActiveTab("content");
       }
+      setToolActivityPhase((previous) => {
+        if (previous === "failed") {
+          return "failed";
+        }
+        if (previous === "tools") {
+          return "completed";
+        }
+        if (previous === "thinking") {
+          return "idle";
+        }
+        return previous;
+      });
       setAgentState("Idle");
     } catch (error) {
       setMessages((previous) => previous.filter((message) => message.id !== optimisticMessage.id));
@@ -1073,239 +1165,333 @@ export default function App() {
 
   const streamBadgeClasses =
     streamStatus === "connected"
-      ? "bg-emerald-100 text-emerald-700"
+      ? "bg-emerald-500/20 text-emerald-200"
       : streamStatus === "reconnecting"
-        ? "bg-amber-100 text-amber-700"
+        ? "bg-amber-500/20 text-amber-200"
         : streamStatus === "disconnected"
-          ? "bg-rose-100 text-rose-700"
-          : "bg-slate-200 text-slate-700";
+          ? "bg-rose-500/20 text-rose-200"
+          : "bg-slate-500/20 text-slate-200";
+  const gridTransitionClasses = isResizingWorkspace
+    ? "xl:transition-none"
+    : "xl:transition-[grid-template-columns] xl:duration-300 xl:ease-in-out";
+  const shellGridClass = isSessionsCollapsed ? "xl:grid-cols-[68px_minmax(0,1fr)]" : "xl:grid-cols-[264px_minmax(0,1fr)]";
+  const clampWorkspaceWidth = (nextWidth: number): number => {
+    const shellWidth = shellRef.current?.clientWidth ?? window.innerWidth;
+    const sessionsWidth = isSessionsCollapsed ? 68 : 264;
+    const maxWorkspaceWidth = Math.max(MIN_WORKSPACE_WIDTH, shellWidth - sessionsWidth - MIN_CHAT_WIDTH);
+    return Math.min(Math.max(nextWidth, MIN_WORKSPACE_WIDTH), maxWorkspaceWidth);
+  };
+  const clampedWorkspaceWidth = clampWorkspaceWidth(workspaceWidth);
+  const shouldShowHideWorkspaceButton = clampedWorkspaceWidth >= HIDE_WORKSPACE_BUTTON_MIN_WIDTH;
+  const workspaceGridStyle: CSSProperties = {
+    ["--workspace-width" as string]: `${isWorkspaceCollapsed ? 0 : clampedWorkspaceWidth}px`,
+  } as CSSProperties;
+  const handleWorkspaceResizeStart = (event: ReactMouseEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    const startX = event.clientX;
+    const startWidth = workspaceWidth;
+    setIsResizingWorkspace(true);
+
+    const handleMouseMove = (moveEvent: MouseEvent) => {
+      const delta = startX - moveEvent.clientX;
+      setWorkspaceWidth(clampWorkspaceWidth(startWidth + delta));
+    };
+
+    const handleMouseUp = () => {
+      setIsResizingWorkspace(false);
+      window.removeEventListener("mousemove", handleMouseMove);
+      window.removeEventListener("mouseup", handleMouseUp);
+    };
+
+    window.addEventListener("mousemove", handleMouseMove);
+    window.addEventListener("mouseup", handleMouseUp);
+  };
+
+  useEffect(() => {
+    if (isWorkspaceCollapsed) {
+      return;
+    }
+    const handleResize = () => {
+      setWorkspaceWidth((current) => clampWorkspaceWidth(current));
+    };
+    handleResize();
+    window.addEventListener("resize", handleResize);
+    return () => {
+      window.removeEventListener("resize", handleResize);
+    };
+  }, [isWorkspaceCollapsed, isSessionsCollapsed]);
 
   return (
-    <main className="min-h-screen bg-slate-50 text-slate-900">
-      <div className="mx-auto grid min-h-screen max-w-7xl grid-cols-1 gap-4 p-4 sm:p-6 lg:grid-cols-[320px_1fr]">
-        <aside className="rounded-xl border border-slate-200 bg-slate-50 p-3 shadow-sm sm:p-4">
-          <div className="flex items-center justify-between">
-            <h1 className="text-lg font-semibold">Sessions</h1>
+    <main
+      className={`min-h-screen text-[var(--text-primary)] xl:h-screen xl:overflow-hidden ${
+        isResizingWorkspace ? "select-none cursor-col-resize" : ""
+      }`}
+    >
+      <div
+        ref={shellRef}
+        className={`mx-auto grid min-h-screen max-w-[1920px] grid-cols-1 xl:h-full xl:min-h-0 ${gridTransitionClasses} ${shellGridClass}`}
+      >
+        <aside className="relative bg-black px-3 py-4 sm:px-4 xl:flex xl:h-full xl:min-h-0 xl:flex-col xl:overflow-hidden">
+          <div
+            className={`flex h-full min-h-0 flex-col items-center gap-3 pt-1 transition-[opacity,transform] duration-300 ease-in-out ${
+              isSessionsCollapsed ? "opacity-100 translate-x-0" : "pointer-events-none absolute inset-0 opacity-0 -translate-x-3"
+            }`}
+          >
+            <button
+              type="button"
+              onClick={() => setIsSessionsCollapsed(false)}
+              className="rounded-full bg-[#2e3542] px-2 py-1 text-sm font-semibold text-[var(--text-secondary)] hover:bg-[#3a4354]"
+            >
+              {">"}
+            </button>
           </div>
-          <p className="mt-1 text-xs text-slate-600">Create and switch chat sessions.</p>
-
-          <div className="mt-3 flex flex-wrap gap-2">
-            <span className={`rounded-md px-2 py-1 text-xs font-medium ${streamBadgeClasses}`}>{streamStatus}</span>
-          </div>
-          {streamNotice ? <p className="mt-2 text-xs text-slate-600">{streamNotice}</p> : null}
-
-          <div className="mt-3 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600">
-            <div className="flex items-center justify-between gap-2">
-              <p className="font-semibold text-slate-700">Writer Profile</p>
-              <button
-                type="button"
-                onClick={() => setIsOnboardingOpen(true)}
-                className="rounded-md border border-slate-300 px-2 py-1 text-[11px] font-semibold text-slate-700 hover:bg-slate-50"
-              >
-                {userContext ? "Edit" : "Setup"}
-              </button>
-            </div>
-            <p className="mt-1 truncate">{userContext?.user_name ?? "Not configured"}</p>
-            <p className="truncate text-slate-500">{userContext?.profile.company_name ?? "No company yet"}</p>
-          </div>
-
-          <div className="mt-3">
-            <SessionCreateForm onCreate={handleCreateSession} loading={isCreatingSession} disabled={!userContext} />
-          </div>
-
-          <div className="mt-3 max-h-[52vh] overflow-y-auto pr-1">
-            {loadingSessions ? (
-              <div className="space-y-2 rounded-xl border border-slate-200 bg-white p-3">
-                {Array.from({ length: 4 }).map((_, index) => (
-                  <div key={`session-skeleton-${index}`} className="rounded-lg border border-slate-100 bg-slate-50 p-2">
-                    <LoadingSkeleton className="h-3 w-3/4" />
-                    <LoadingSkeleton className="mt-2 h-2.5 w-1/2" />
-                  </div>
-                ))}
+          <div
+            className={`h-full min-h-0 flex flex-col transition-[opacity,transform] duration-300 ease-in-out ${
+              isSessionsCollapsed ? "pointer-events-none absolute inset-0 opacity-0 translate-x-3" : "opacity-100 translate-x-0"
+            }`}
+          >
+            {!isSessionsCollapsed ? (
+              <>
+              <div className="flex items-center justify-between">
+                <h1 className="text-lg font-semibold tracking-tight">Sessions</h1>
+                <button
+                  type="button"
+                  onClick={() => setIsSessionsCollapsed(true)}
+                  className="rounded-full bg-[#2e3542] px-2 py-1 text-xs font-semibold text-[var(--text-secondary)] hover:bg-[#3a4354]"
+                >
+                  {"<"}
+                </button>
               </div>
-            ) : (
-              <SessionList sessions={sessions} activeSessionId={activeSessionId} onSelectSession={handleSelectSession} />
-            )}
-          </div>
 
-          <div className="mt-3 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600">
-            <p className="font-semibold text-slate-700">Active Session</p>
-            <p className="mt-1 truncate">{activeSession?.title ?? "None selected"}</p>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <span className={`rounded-full px-2 py-1 text-xs font-medium ${streamBadgeClasses}`}>{streamStatus}</span>
+                <span className="rounded-full bg-[#2f3644] px-2 py-1 text-xs font-semibold text-[var(--text-secondary)]">
+                  {agentState}
+                </span>
+              </div>
+              {streamNotice ? <p className="mt-2 text-xs text-[var(--text-tertiary)]">{streamNotice}</p> : null}
+              <div className="mt-3 border-t border-[#2e3440]" />
+
+              <div className="mt-4 px-1 text-xs text-[var(--text-secondary)]">
+                <div className="flex items-center justify-between gap-2">
+                  <p className="font-semibold text-[var(--text-primary)]">Writer Profile</p>
+                  <button
+                    type="button"
+                    onClick={() => setIsOnboardingOpen(true)}
+                    className="rounded-full bg-[#2e3542] px-2 py-1 text-[11px] font-semibold text-[var(--text-secondary)] hover:bg-[#3a4354]"
+                  >
+                    {userContext ? "Edit" : "Setup"}
+                  </button>
+                </div>
+                <p className="mt-1 truncate">{userContext?.user_name ?? "Not configured"}</p>
+                <p className="truncate text-[var(--text-tertiary)]">{userContext?.profile.company_name ?? "No company yet"}</p>
+              </div>
+              <div className="mt-3 border-t border-[#2e3440]" />
+
+              <div className="mt-2">
+                <SessionCreateForm onCreate={handleCreateSession} loading={isCreatingSession} disabled={!userContext} />
+              </div>
+
+              <div className="mt-3 max-h-[40vh] overflow-y-auto pr-1 sm:max-h-[46vh] xl:max-h-none xl:min-h-0 xl:flex-1">
+                {loadingSessions ? (
+                  <div className="flex items-center justify-center py-10">
+                    <LoadingSkeleton />
+                  </div>
+                ) : (
+                  <SessionList sessions={sessions} activeSessionId={activeSessionId} onSelectSession={handleSelectSession} />
+                )}
+              </div>
+              </>
+            ) : null}
           </div>
         </aside>
 
-        <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <h2 className="text-xl font-semibold">Workspace</h2>
-            <span className="rounded-md bg-indigo-100 px-3 py-1 text-xs font-semibold text-indigo-700">{agentState}</span>
-          </div>
-          <p className="mt-1 text-sm text-slate-600">
-            {activeSession
-              ? `Session: ${activeSession.title || "Untitled session"}`
-              : "Select or create a session to start chatting."}
-          </p>
-
-          {errorMessage && <p className="mt-3 rounded-md bg-rose-100 px-3 py-2 text-sm text-rose-700">{errorMessage}</p>}
+        <section className="flex min-h-screen flex-col bg-[#181818] xl:h-full xl:min-h-0 xl:overflow-hidden">
+          {isWorkspaceCollapsed ? (
+            <div className="flex items-center justify-end px-3 pt-3 sm:px-5">
+              <button
+                type="button"
+                onClick={() => setIsWorkspaceCollapsed(false)}
+                className="rounded-full bg-[#2e3542] px-3 py-1 text-xs font-semibold text-[var(--text-secondary)] hover:bg-[#3a4354]"
+              >
+                Show workspace
+              </button>
+            </div>
+          ) : null}
+          {errorMessage && <p className="mx-3 mt-4 rounded-xl bg-[#3d2430] px-3 py-2 text-sm text-rose-200 sm:mx-5">{errorMessage}</p>}
 
           {!activeSession ? (
-            <div className="mt-4 rounded-xl border border-dashed border-slate-300 bg-slate-50 px-4 py-8 text-sm text-slate-500">
+            <div className="mt-4 px-3 py-8 text-sm text-[var(--text-secondary)] sm:px-5">
               No active session. Create one from the left sidebar.
             </div>
-          ) : loadingMessages ? (
-            <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-4">
-              <div className="space-y-3">
-                <div className="max-w-[78%] rounded-xl border border-slate-200 bg-white p-3">
-                  <LoadingSkeleton className="h-2.5 w-20" />
-                  <LoadingSkeleton className="mt-2 h-3 w-full" />
-                  <LoadingSkeleton className="mt-2 h-3 w-5/6" />
-                </div>
-                <div className="ml-auto max-w-[78%] rounded-xl border border-slate-200 bg-white p-3">
-                  <LoadingSkeleton className="h-2.5 w-16" />
-                  <LoadingSkeleton className="mt-2 h-3 w-full" />
-                  <LoadingSkeleton className="mt-2 h-3 w-4/5" />
-                </div>
-                <div className="max-w-[78%] rounded-xl border border-slate-200 bg-white p-3">
-                  <LoadingSkeleton className="h-2.5 w-20" />
-                  <LoadingSkeleton className="mt-2 h-3 w-11/12" />
-                </div>
-              </div>
-            </div>
           ) : (
-            <div className="mt-4 grid grid-cols-1 gap-4 xl:grid-cols-[1fr_360px]">
-              <div>
-                <ChatMessageList messages={messages} isThinking={isAgentThinking} />
-                <ToolActivityIndicator
-                  phase={toolActivityPhase}
-                  summary={toolActivitySummary}
-                  expectedToolCount={expectedToolCount}
-                  tools={toolRuns}
-                />
-                <ChatInput onSend={handleSendMessage} disabled={isCreatingSession} loading={isSending} />
+            <div
+              style={workspaceGridStyle}
+              className={`mt-2 grid min-h-0 flex-1 grid-cols-1 gap-0 xl:grid-cols-[minmax(0,1fr)_var(--workspace-width)] xl:overflow-hidden ${gridTransitionClasses}`}
+            >
+              <div className="flex min-h-[72vh] flex-col bg-[#181818] xl:relative xl:min-h-0 xl:overflow-hidden">
+                <div className="mx-auto flex min-h-0 w-full max-w-[52rem] flex-1 flex-col px-2 sm:px-4">
+                  <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
+                    <ChatMessageList messages={messages} isThinking={isAgentThinking} />
+                    {loadingMessages ? (
+                      <div className="absolute inset-0 z-10 flex items-center justify-center bg-[#181818]/78">
+                        <LoadingSkeleton />
+                      </div>
+                    ) : null}
+                  </div>
+                  <ToolActivityIndicator
+                    phase={toolActivityPhase}
+                    summary={toolActivitySummary}
+                    expectedToolCount={expectedToolCount}
+                    tools={toolRuns}
+                    visible={isToolActivityVisible}
+                    isFading={isToolActivityFading}
+                  />
+                  <ChatInput onSend={handleSendMessage} disabled={isCreatingSession} loading={isSending} />
+                </div>
+                {!isWorkspaceCollapsed ? (
+                  <div
+                    role="separator"
+                    aria-orientation="vertical"
+                    onMouseDown={handleWorkspaceResizeStart}
+                    className={`hidden xl:block absolute right-0 top-0 z-20 h-full w-2 cursor-col-resize ${
+                      isResizingWorkspace ? "bg-[#3a4354]" : "bg-transparent hover:bg-[#2e3542]"
+                    }`}
+                  />
+                ) : null}
               </div>
 
-              <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
-                <div className="flex items-center justify-between gap-2">
-                  <p className="text-sm font-semibold text-slate-900">Dynamic Workspace</p>
-                  <WorkspaceTabs activeTab={activeTab} onChange={setActiveTab} />
-                </div>
+              <div className="xl:min-h-0 xl:overflow-hidden">
+                <div
+                  className={`h-full bg-black px-3 pb-3 pt-2 transition-[opacity,transform] duration-300 ease-in-out sm:px-5 xl:flex xl:min-h-0 xl:flex-col xl:px-4 ${
+                    isWorkspaceCollapsed ? "pointer-events-none opacity-0 translate-x-4" : "opacity-100 translate-x-0"
+                  }`}
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-sm font-semibold text-[var(--text-primary)]">Dynamic Workspace</p>
+                    <div className="flex items-center gap-2">
+                      <WorkspaceTabs activeTab={activeTab} onChange={setActiveTab} />
+                      {shouldShowHideWorkspaceButton ? (
+                        <button
+                          type="button"
+                          onClick={() => setIsWorkspaceCollapsed(true)}
+                          className="rounded-full bg-[#2e3542] px-3 py-1 text-xs font-semibold text-[var(--text-secondary)] hover:bg-[#3a4354]"
+                        >
+                          Hide workspace
+                        </button>
+                      ) : null}
+                    </div>
+                  </div>
 
-                {activeTab === "plan" ? (
-                  <div className="mt-3 max-h-[62vh] space-y-4 overflow-y-auto pr-1">
-                    <div>
-                      <div className="mb-2 flex items-center justify-between gap-2">
-                        <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Brainstorming Workspace</p>
-                        <span className="text-[11px] text-slate-500">{ideaPlans.length} idea{ideaPlans.length === 1 ? "" : "s"}</span>
+                  {activeTab === "plan" ? (
+                    <div className="mt-3 max-h-[64vh] space-y-4 overflow-y-auto pr-1 xl:max-h-none xl:min-h-0 xl:flex-1">
+                      <div>
+                        <div className="mb-2 flex items-center justify-between gap-2">
+                          <p className="rounded-full bg-[#1f2f2a] px-2 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-emerald-200">
+                            Brainstorming Workspace
+                          </p>
+                          <div className="flex items-center gap-2">
+                            <span className="rounded-full bg-[#1f2f2a] px-2 py-1 text-[11px] font-semibold text-emerald-200">
+                              {ideaPlans.length} idea{ideaPlans.length === 1 ? "" : "s"}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => setIsBrainstormSectionCollapsed((current) => !current)}
+                              aria-label={isBrainstormSectionCollapsed ? "Expand brainstorming section" : "Collapse brainstorming section"}
+                              className="flex h-5 w-5 items-center justify-center rounded-full bg-[#2e3542] text-[10px] font-semibold text-[var(--text-secondary)] hover:bg-[#3a4354]"
+                            >
+                              {isBrainstormSectionCollapsed ? ">" : "v"}
+                            </button>
+                          </div>
+                        </div>
+                        {isBrainstormSectionCollapsed ? null : loadingIdeaPlans ? (
+                          <div className="flex items-center justify-center py-8">
+                            <LoadingSkeleton />
+                          </div>
+                        ) : ideaPlans.length === 0 ? (
+                          <div className="px-2 py-5 text-sm text-[var(--text-secondary)]">
+                            No blog ideas yet. Ask the agent to brainstorm ideas.
+                          </div>
+                        ) : (
+                          <div className="space-y-3">
+                            {ideaPlans.map((plan) => (
+                              <IdeaCard
+                                key={plan.id}
+                                plan={plan}
+                                sessionTitle={sessionTitleById.get(plan.conversation_id) ?? null}
+                                isCurrentSession={plan.conversation_id === activeSessionId}
+                                starting={startingSessionPlanId === plan.id}
+                                onStartSession={handleStartSessionFromIdea}
+                                onOpenSession={handleOpenSessionFromIdea}
+                              />
+                            ))}
+                          </div>
+                        )}
                       </div>
-                      {loadingIdeaPlans ? (
-                        <div className="space-y-3 rounded-xl border border-slate-200 bg-white p-3">
-                          {Array.from({ length: 2 }).map((_, index) => (
-                            <div key={`idea-skeleton-${index}`} className="rounded-xl border border-slate-100 bg-slate-50 p-3">
-                              <LoadingSkeleton className="h-3 w-28" />
-                              <LoadingSkeleton className="mt-2 h-4 w-5/6" />
-                              <LoadingSkeleton className="mt-2 h-3 w-full" />
-                              <LoadingSkeleton className="mt-1.5 h-3 w-4/5" />
-                              <div className="mt-3 flex gap-1">
-                                <LoadingSkeleton className="h-5 w-14 rounded-full" />
-                                <LoadingSkeleton className="h-5 w-16 rounded-full" />
-                                <LoadingSkeleton className="h-5 w-12 rounded-full" />
-                              </div>
-                            </div>
-                          ))}
+
+                      <div className="border-t border-[#2e3440] pt-4">
+                        <div className="mb-2 flex items-center justify-between gap-2">
+                          <p className="rounded-full bg-[#25262f] px-2 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-sky-200">
+                            Session Plans
+                          </p>
+                          <div className="flex items-center gap-2">
+                            <span className="rounded-full bg-[#25262f] px-2 py-1 text-[11px] font-semibold text-sky-200">
+                              {plans.length} in this session
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => setIsSessionPlansSectionCollapsed((current) => !current)}
+                              aria-label={isSessionPlansSectionCollapsed ? "Expand session plans section" : "Collapse session plans section"}
+                              className="flex h-5 w-5 items-center justify-center rounded-full bg-[#2e3542] text-[10px] font-semibold text-[var(--text-secondary)] hover:bg-[#3a4354]"
+                            >
+                              {isSessionPlansSectionCollapsed ? ">" : "v"}
+                            </button>
+                          </div>
                         </div>
-                      ) : ideaPlans.length === 0 ? (
-                        <div className="rounded-xl border border-dashed border-slate-300 bg-white px-3 py-6 text-sm text-slate-500">
-                          No blog ideas yet. Ask the agent to brainstorm ideas.
-                        </div>
-                      ) : (
-                        <div className="space-y-3">
-                          {ideaPlans.map((plan) => (
-                            <IdeaCard
+                        {isSessionPlansSectionCollapsed ? null : loadingPlans ? (
+                          <div className="flex items-center justify-center py-8">
+                            <LoadingSkeleton />
+                          </div>
+                        ) : plans.length === 0 ? (
+                          <div className="px-2 py-5 text-sm text-[var(--text-secondary)]">
+                            No plans yet. Ask the agent to create one.
+                          </div>
+                        ) : (
+                          plans.map((plan) => (
+                            <PlanCard
                               key={plan.id}
                               plan={plan}
-                              sessionTitle={sessionTitleById.get(plan.conversation_id) ?? null}
-                              isCurrentSession={plan.conversation_id === activeSessionId}
-                              starting={startingSessionPlanId === plan.id}
-                              onStartSession={handleStartSessionFromIdea}
-                              onOpenSession={handleOpenSessionFromIdea}
+                              onSave={handleSavePlan}
+                              onDelete={handleDeletePlan}
+                              onExecute={handleExecutePlan}
+                              saving={savingPlanId === plan.id}
+                              deleting={deletingPlanId === plan.id}
+                              executing={executingPlanId === plan.id}
                             />
-                          ))}
-                        </div>
-                      )}
-                    </div>
-
-                    <div>
-                      <div className="mb-2 flex items-center justify-between gap-2">
-                        <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Session Plans</p>
-                        <span className="text-[11px] text-slate-500">{plans.length} in this session</span>
+                          ))
+                        )}
                       </div>
-                      {loadingPlans ? (
-                        <div className="space-y-3 rounded-xl border border-slate-200 bg-white p-3">
-                          {Array.from({ length: 2 }).map((_, index) => (
-                            <div key={`plan-skeleton-${index}`} className="rounded-xl border border-slate-100 bg-slate-50 p-3">
-                              <div className="flex items-start justify-between">
-                                <div className="w-full pr-2">
-                                  <LoadingSkeleton className="h-3 w-16" />
-                                  <LoadingSkeleton className="mt-2 h-4 w-4/5" />
-                                </div>
-                                <LoadingSkeleton className="h-5 w-16" />
-                              </div>
-                              <LoadingSkeleton className="mt-3 h-3 w-full" />
-                              <LoadingSkeleton className="mt-1.5 h-3 w-5/6" />
-                              <div className="mt-3 flex gap-2">
-                                <LoadingSkeleton className="h-6 w-16" />
-                                <LoadingSkeleton className="h-6 w-20" />
-                                <LoadingSkeleton className="h-6 w-14" />
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      ) : plans.length === 0 ? (
-                        <div className="rounded-xl border border-dashed border-slate-300 bg-white px-3 py-6 text-sm text-slate-500">
-                          No plans yet. Ask the agent to create one.
+                    </div>
+                  ) : (
+                    <div className="mt-3 xl:min-h-0 xl:flex-1 xl:overflow-hidden">
+                      {loadingContentItems ? (
+                        <div className="flex items-center justify-center py-8">
+                          <LoadingSkeleton />
                         </div>
                       ) : (
-                        plans.map((plan) => (
-                          <PlanCard
-                            key={plan.id}
-                            plan={plan}
-                            onSave={handleSavePlan}
-                            onDelete={handleDeletePlan}
-                            onExecute={handleExecutePlan}
-                            saving={savingPlanId === plan.id}
-                            deleting={deletingPlanId === plan.id}
-                            executing={executingPlanId === plan.id}
-                          />
-                        ))
+                        <ContentDisplay
+                          contentItems={contentItems}
+                          selectedContentId={selectedContentId}
+                          onSelectContent={setSelectedContentId}
+                          onSave={handleSaveContent}
+                          onRegenerate={handleRegenerateContent}
+                          savingContentId={savingContentId}
+                          regeneratingContentId={regeneratingContentId}
+                        />
                       )}
                     </div>
-                  </div>
-                ) : (
-                  <div className="mt-3">
-                    {loadingContentItems ? (
-                      <div className="space-y-3 rounded-xl border border-slate-200 bg-white p-3">
-                        <LoadingSkeleton className="h-3 w-16" />
-                        <div className="flex gap-2">
-                          <LoadingSkeleton className="h-12 w-44" />
-                          <LoadingSkeleton className="h-12 w-44" />
-                        </div>
-                        <LoadingSkeleton className="h-8 w-full" />
-                        <LoadingSkeleton className="h-24 w-full" />
-                        <LoadingSkeleton className="h-24 w-full" />
-                        <LoadingSkeleton className="h-24 w-full" />
-                      </div>
-                    ) : (
-                      <ContentDisplay
-                        contentItems={contentItems}
-                        selectedContentId={selectedContentId}
-                        onSelectContent={setSelectedContentId}
-                        onSave={handleSaveContent}
-                        onRegenerate={handleRegenerateContent}
-                        savingContentId={savingContentId}
-                        regeneratingContentId={regeneratingContentId}
-                      />
-                    )}
-                  </div>
-                )}
+                  )}
+                </div>
               </div>
             </div>
           )}
@@ -1329,3 +1515,4 @@ export default function App() {
     </main>
   );
 }
+
