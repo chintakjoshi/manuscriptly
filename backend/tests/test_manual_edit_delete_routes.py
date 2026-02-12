@@ -11,7 +11,7 @@ from app.api.routes.content import content_bp
 from app.api.routes.plans import plans_bp
 from app.models import ContentItem, ContentPlan
 
-from fakes import InMemoryDbSession
+from tests.fakes import InMemoryDbSession
 
 
 class ManualEditDeleteRouteTests(unittest.TestCase):
