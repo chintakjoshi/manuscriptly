@@ -304,7 +304,7 @@ export function ContentDisplay({
   const wordCount = content.trim().split(/\s+/).filter(Boolean).length;
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-3 xl:flex xl:h-full xl:min-h-0 xl:flex-col">
       <div className="border-b border-[#2e3440] px-1 pb-3">
         <div className="flex items-center justify-between gap-2">
           <p className="rounded-full bg-[#2b2436] px-2 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-violet-200">
@@ -338,7 +338,7 @@ export function ContentDisplay({
         </div>
       </div>
 
-      <article className="px-1 py-1">
+      <article className="px-1 py-1 xl:flex xl:min-h-0 xl:flex-1 xl:flex-col">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <h3 className="text-base font-semibold text-[var(--text-primary)]">Content Preview & Edit</h3>
           <div className="flex flex-wrap items-center gap-2">
@@ -366,7 +366,7 @@ export function ContentDisplay({
           </div>
         </div>
 
-        <div className="mt-3 space-y-2">
+        <div className="mt-3 space-y-2 xl:flex xl:min-h-0 xl:flex-1 xl:flex-col">
           <input
             type="text"
             value={title}
@@ -414,12 +414,12 @@ export function ContentDisplay({
                 setContent(event.target.value);
                 clearNotices();
               }}
-              rows={16}
-              className="w-full rounded-xl bg-[#1f2530] px-3 py-2 font-mono text-xs leading-relaxed text-[var(--text-primary)] outline-none"
+              rows={20}
+              className="min-h-[320px] w-full rounded-xl bg-[#1f2530] px-3 py-2 font-mono text-xs leading-relaxed text-[var(--text-primary)] outline-none xl:min-h-0 xl:flex-1"
               placeholder="Generated markdown content"
             />
           ) : (
-            <div className="max-h-[480px] overflow-y-auto rounded-xl bg-[#1c212b] px-4 py-3">
+            <div className="min-h-[320px] overflow-y-auto rounded-xl bg-[#1c212b] px-4 py-3 xl:min-h-0 xl:flex-1">
               {content.trim() ? (
                 <div className="markdown-preview text-sm text-[var(--text-secondary)]">
                   <ReactMarkdown

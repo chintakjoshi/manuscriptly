@@ -40,11 +40,11 @@ export function ChatInput({ onSend, disabled = false, loading = false }: ChatInp
   };
 
   return (
-    <form onSubmit={(event) => void handleSubmit(event)} className="px-2 pb-2 pt-3 sm:px-4 sm:pb-4">
+    <form onSubmit={(event) => void handleSubmit(event)} className="pb-2 pt-3 sm:pb-4">
       <label htmlFor="chat-input" className="sr-only">
         Message
       </label>
-      <div className="mx-auto flex w-full max-w-[52rem] items-end gap-2 rounded-3xl bg-black p-2 shadow-[0_8px_36px_rgba(0,0,0,0.28)]">
+      <div className="flex w-full items-end gap-2 rounded-3xl bg-black p-2">
         <textarea
           id="chat-input"
           value={value}
@@ -64,7 +64,7 @@ export function ChatInput({ onSend, disabled = false, loading = false }: ChatInp
           {loading ? "\u2026" : "\u2191"}
         </button>
       </div>
-      <p className="mx-auto mt-2 w-full max-w-[52rem] px-2 text-[11px] text-[var(--text-tertiary)]">
+      <p className="mt-2 w-full px-2 text-[11px] text-[var(--text-tertiary)]">
         Enter to send. Shift+Enter for newline.
       </p>
     </form>

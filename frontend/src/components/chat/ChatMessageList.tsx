@@ -16,8 +16,8 @@ export function ChatMessageList({ messages, isThinking }: ChatMessageListProps) 
   }, [messages.length, isThinking]);
 
   return (
-    <div className="min-h-0 flex-1 overflow-y-auto px-2 py-3 [scrollbar-gutter:stable] sm:px-4">
-      <ul className="mx-auto w-full max-w-[52rem] space-y-3">
+    <div className="min-h-0 flex-1 overflow-y-auto py-3 [scrollbar-gutter:stable_both-edges]">
+      <ul className="m-0 w-full list-none space-y-3 p-0">
         {messages.length === 0 && (
           <li className="rounded-2xl bg-[var(--app-bg-soft)]/80 px-5 py-8 text-sm text-[var(--text-secondary)]">
             Start the conversation by describing your blog topic and goals.
@@ -28,7 +28,7 @@ export function ChatMessageList({ messages, isThinking }: ChatMessageListProps) 
         ))}
         {isThinking && (
           <li className="fade-slide-in flex justify-start">
-            <article className="max-w-[90%] rounded-2xl bg-[var(--app-bg-soft)] px-4 py-3">
+            <article className="w-full rounded-2xl bg-[var(--app-bg-soft)] px-4 py-3">
               <p className="text-[14px] leading-6 text-[var(--text-secondary)]">
                 Agent is thinking<span className="animate-pulse">...</span>
               </p>

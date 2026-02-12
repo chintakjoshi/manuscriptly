@@ -1256,21 +1256,23 @@ export default function App() {
           ) : (
             <div style={workspaceGridStyle} className={`mt-2 grid min-h-0 flex-1 grid-cols-1 gap-0 xl:overflow-hidden ${workspaceGridClass}`}>
               <div className="flex min-h-[72vh] flex-col bg-[#181818] xl:relative xl:min-h-0 xl:overflow-hidden">
-                <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
-                  <ChatMessageList messages={messages} isThinking={isAgentThinking} />
-                  {loadingMessages ? (
-                    <div className="absolute inset-0 z-10 flex items-center justify-center bg-[#181818]/78">
-                      <LoadingSkeleton />
-                    </div>
-                  ) : null}
+                <div className="mx-auto flex min-h-0 w-full max-w-[52rem] flex-1 flex-col px-2 sm:px-4">
+                  <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
+                    <ChatMessageList messages={messages} isThinking={isAgentThinking} />
+                    {loadingMessages ? (
+                      <div className="absolute inset-0 z-10 flex items-center justify-center bg-[#181818]/78">
+                        <LoadingSkeleton />
+                      </div>
+                    ) : null}
+                  </div>
+                  <ToolActivityIndicator
+                    phase={toolActivityPhase}
+                    summary={toolActivitySummary}
+                    expectedToolCount={expectedToolCount}
+                    tools={toolRuns}
+                  />
+                  <ChatInput onSend={handleSendMessage} disabled={isCreatingSession} loading={isSending} />
                 </div>
-                <ToolActivityIndicator
-                  phase={toolActivityPhase}
-                  summary={toolActivitySummary}
-                  expectedToolCount={expectedToolCount}
-                  tools={toolRuns}
-                />
-                <ChatInput onSend={handleSendMessage} disabled={isCreatingSession} loading={isSending} />
                 {!isWorkspaceCollapsed ? (
                   <div
                     role="separator"
@@ -1391,7 +1393,7 @@ export default function App() {
                       </div>
                     </div>
                   ) : (
-                    <div className="mt-3 xl:min-h-0 xl:flex-1 xl:overflow-y-auto">
+                    <div className="mt-3 xl:min-h-0 xl:flex-1 xl:overflow-hidden">
                       {loadingContentItems ? (
                         <div className="flex items-center justify-center py-8">
                           <LoadingSkeleton />

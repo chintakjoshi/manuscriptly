@@ -37,7 +37,7 @@ export function ToolActivityIndicator({ phase, summary, expectedToolCount, tools
         : "bg-amber-500/20 text-amber-200";
 
   return (
-    <div className="mx-auto mt-2 w-full max-w-3xl border-t border-[#2e3440] px-3 pt-3">
+    <div className="mt-2 w-full border-t border-[#2e3440] px-3 pt-3">
       <div className="flex items-center justify-between gap-2">
         <p className="text-[11px] font-semibold uppercase tracking-[0.13em] text-[var(--text-tertiary)]">Agent Activity</p>
         <span className={`rounded-md px-2 py-1 text-xs font-semibold ${statusChipClass}`}>{summary}</span>
