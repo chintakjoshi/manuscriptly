@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 
+import { ConfirmModal } from "../common/ConfirmModal";
 import type { PlanDto, PlanUpdateRequest } from "../../lib/api";
 
 type PlanCardProps = {
@@ -29,6 +30,7 @@ export function PlanCard({
   const [researchNotes, setResearchNotes] = useState(plan.research_notes ?? "");
   const [status, setStatus] = useState(plan.status);
   const [error, setError] = useState<string | null>(null);
+  const [confirmIntent, setConfirmIntent] = useState<"delete" | "execute" | null>(null);
 
   useEffect(() => {
     if (editing) {
@@ -76,9 +78,6 @@ export function PlanCard({
   };
 
   const handleDelete = async () => {
-    if (!window.confirm("Delete this plan? This will also remove linked content.")) {
-      return;
-    }
     setError(null);
     try {
       await onDelete(plan.id);
@@ -91,14 +90,6 @@ export function PlanCard({
     if (!onExecute) {
       return;
     }
-    const confirmation = window.confirm(
-      plan.status === "executed"
-        ? "This plan already has generated content. Execute again and generate a new draft?"
-        : "Execute this plan and generate full blog content now?",
-    );
-    if (!confirmation) {
-      return;
-    }
     setError(null);
     try {
       await onExecute(plan);
@@ -106,6 +97,30 @@ export function PlanCard({
       setError(err instanceof Error ? err.message : "Failed to execute plan.");
     }
   };
+
+  const handleConfirmAction = async () => {
+    if (!confirmIntent) {
+      return;
+    }
+    const currentIntent = confirmIntent;
+    setConfirmIntent(null);
+    if (currentIntent === "delete") {
+      await handleDelete();
+      return;
+    }
+    await handleExecute();
+  };
+
+  const confirmationTitle = confirmIntent === "delete" ? "Delete plan?" : "Execute plan?";
+  const confirmationMessage =
+    confirmIntent === "delete"
+      ? "This will remove the plan and linked content drafts. This action cannot be undone."
+      : plan.status === "executed"
+        ? "This plan already has generated content. Execute again to generate a new draft?"
+        : "Execute this plan and generate the full blog content now?";
+  const confirmationTone = confirmIntent === "delete" ? "danger" : "success";
+  const confirmationLabel = confirmIntent === "delete" ? "Delete Plan" : "Execute Plan";
+  const isConfirmationLoading = confirmIntent === "delete" ? deleting : executing;
 
   return (
     <article className="border-b border-[#2e3440] px-1 py-3">
@@ -140,7 +155,7 @@ export function PlanCard({
             {onExecute ? (
               <button
                 type="button"
-                onClick={() => void handleExecute()}
+                onClick={() => setConfirmIntent("execute")}
                 disabled={executing}
                 className="rounded-full bg-[#193029] px-2 py-1 text-xs font-semibold text-emerald-200 hover:bg-[#214036] disabled:cursor-not-allowed disabled:opacity-60"
               >
@@ -149,7 +164,7 @@ export function PlanCard({
             ) : null}
             <button
               type="button"
-              onClick={() => void handleDelete()}
+              onClick={() => setConfirmIntent("delete")}
               disabled={deleting}
               className="rounded-full bg-[#382028] px-2 py-1 text-xs font-semibold text-rose-200 hover:bg-[#482833] disabled:cursor-not-allowed disabled:opacity-60"
             >
@@ -225,6 +240,16 @@ export function PlanCard({
       )}
 
       {error && <p className="mt-2 rounded-xl bg-[#3d2430]/80 px-2 py-1 text-xs text-rose-200">{error}</p>}
+      <ConfirmModal
+        open={confirmIntent !== null}
+        title={confirmationTitle}
+        message={confirmationMessage}
+        confirmLabel={confirmationLabel}
+        tone={confirmationTone}
+        loading={isConfirmationLoading}
+        onConfirm={() => void handleConfirmAction()}
+        onCancel={() => setConfirmIntent(null)}
+      />
     </article>
   );
 }

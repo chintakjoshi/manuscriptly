@@ -3,9 +3,12 @@ import rehypeHighlight from "rehype-highlight";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
+import { ConfirmModal } from "../common/ConfirmModal";
 import type { ContentItemDto, ContentUpdateRequest } from "../../lib/api";
 
 type ViewMode = "preview" | "edit";
+
+const DEFAULT_REGENERATE_INSTRUCTIONS = "Keep the same structure but strengthen examples and clarity.";
 
 type ContentDisplayProps = {
   contentItems: ContentItemDto[];
@@ -128,6 +131,8 @@ export function ContentDisplay({
   const [error, setError] = useState<string | null>(null);
   const [saveNotice, setSaveNotice] = useState<string | null>(null);
   const [actionNotice, setActionNotice] = useState<string | null>(null);
+  const [isRegenerateModalOpen, setIsRegenerateModalOpen] = useState(false);
+  const [regenerateInstructions, setRegenerateInstructions] = useState(DEFAULT_REGENERATE_INSTRUCTIONS);
 
   useEffect(() => {
     if (!selectedItem) {
@@ -146,6 +151,8 @@ export function ContentDisplay({
     setError(null);
     setSaveNotice(null);
     setActionNotice(null);
+    setIsRegenerateModalOpen(false);
+    setRegenerateInstructions(DEFAULT_REGENERATE_INSTRUCTIONS);
   }, [selectedItem?.id]);
 
   const plainTextContent = useMemo(() => toPlainText(content), [content]);
@@ -226,20 +233,18 @@ export function ContentDisplay({
     }
   };
 
+  const openRegenerateModal = () => {
+    setRegenerateInstructions(DEFAULT_REGENERATE_INSTRUCTIONS);
+    setIsRegenerateModalOpen(true);
+  };
+
   const handleRegenerate = async () => {
-    const confirmed = window.confirm("Regenerate this draft from its plan?");
-    if (!confirmed) {
-      return;
-    }
-    const instructions = window.prompt(
-      "Optional: add writing instructions for this regeneration.",
-      "Keep the same structure but strengthen examples and clarity.",
-    );
     setError(null);
     setSaveNotice(null);
     setActionNotice(null);
     try {
-      await onRegenerate(selectedItem.id, instructions?.trim() || null);
+      await onRegenerate(selectedItem.id, regenerateInstructions.trim() || null);
+      setIsRegenerateModalOpen(false);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to regenerate content.");
     }
@@ -447,7 +452,7 @@ export function ContentDisplay({
           </button>
           <button
             type="button"
-            onClick={() => void handleRegenerate()}
+            onClick={openRegenerateModal}
             disabled={regeneratingContentId === selectedItem.id}
             className="rounded-full bg-[#193029] px-3 py-1.5 text-xs font-semibold text-emerald-200 hover:bg-[#214036] disabled:cursor-not-allowed disabled:opacity-60"
           >
@@ -487,6 +492,21 @@ export function ContentDisplay({
         {actionNotice ? <p className="mt-3 rounded-xl bg-[#1f3442] px-3 py-2 text-xs text-sky-200">{actionNotice}</p> : null}
         {error ? <p className="mt-3 rounded-xl bg-[#3d2430] px-3 py-2 text-xs text-rose-200">{error}</p> : null}
       </article>
+      <ConfirmModal
+        open={isRegenerateModalOpen}
+        title="Regenerate draft?"
+        message="This will create a fresh version from the plan. You can optionally add writing instructions below."
+        confirmLabel="Regenerate Draft"
+        tone="success"
+        loading={regeneratingContentId === selectedItem.id}
+        onConfirm={() => void handleRegenerate()}
+        onCancel={() => setIsRegenerateModalOpen(false)}
+        inputLabel="Writing instructions (optional)"
+        inputPlaceholder="Keep structure, improve clarity, add local examples..."
+        inputValue={regenerateInstructions}
+        onInputChange={setRegenerateInstructions}
+        inputRows={4}
+      />
     </div>
   );
 }
