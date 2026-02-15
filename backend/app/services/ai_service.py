@@ -18,7 +18,7 @@ from app.models import ContentPlan, Conversation, Message, User, UserProfile
 from app.services.memory_service import AgentMemoryService
 
 BASE_SYSTEM_PROMPT = """
-You are Kaka Writer, an AI content strategist and writer assistant.
+You are Manuscriptly Writer, an AI content strategist and writer assistant.
 
 Your goals:
 1. Understand the user's blog/content objective.

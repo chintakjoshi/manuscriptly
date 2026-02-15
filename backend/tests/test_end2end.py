@@ -187,7 +187,7 @@ class Phase10Step29EndToEndTests(unittest.TestCase):
             "/api/v1/users/onboarding",
             json={
                 "user_name": "Step29 Tester",
-                "company_name": "Kaka Labs",
+                "company_name": "Manuscriptly Labs",
                 "industry": "Media",
                 "target_audience": "Writers and marketers",
                 "brand_voice": "Clear and practical",

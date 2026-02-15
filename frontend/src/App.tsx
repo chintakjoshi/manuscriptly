@@ -39,8 +39,8 @@ import {
 } from "./lib/api";
 import { connectLiveStream } from "./lib/sse";
 
-const ACTIVE_SESSION_STORAGE_KEY = "kaka_writer_active_session_id";
-const USER_ID_STORAGE_KEY = "kaka_writer_user_id";
+const ACTIVE_SESSION_STORAGE_KEY = "manuscriptly_writer_active_session_id";
+const USER_ID_STORAGE_KEY = "manuscriptly_writer_user_id";
 const TEMP_SESSION_ID_PREFIX = "temp-session-";
 const UUID_V4_LIKE_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;

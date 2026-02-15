@@ -8,7 +8,7 @@ load_dotenv(dotenv_path=BACKEND_ROOT / ".env")
 
 
 class Config:
-    APP_NAME = os.getenv("APP_NAME", "kaka-the-writer-backend")
+    APP_NAME = os.getenv("APP_NAME", "manuscriptly-the-writer-backend")
     ENV = os.getenv("FLASK_ENV", "development")
     DEBUG = os.getenv("FLASK_DEBUG", "1") == "1"
     CORS_ORIGINS = [origin.strip() for origin in os.getenv("CORS_ORIGINS", "http://localhost:5173").split(",")]
@@ -19,7 +19,7 @@ class Config:
 
     DATABASE_URL = os.getenv(
         "DATABASE_URL",
-        "postgresql+psycopg://postgres:postgres@localhost:5432/kaka_writer",
+        "postgresql+psycopg://postgres:postgres@localhost:5432/manuscriptly_writer",
     )
     ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
     ANTHROPIC_MODEL = os.getenv("ANTHROPIC_MODEL", "claude-haiku-4-5-20251001")
@@ -34,7 +34,7 @@ class Config:
     WEB_SEARCH_MAX_RESULTS = int(os.getenv("WEB_SEARCH_MAX_RESULTS", "5"))
     WEB_SEARCH_USER_AGENT = os.getenv(
         "WEB_SEARCH_USER_AGENT",
-        "kaka-the-writer/1.0 (+http://localhost)",
+        "manuscriptly-the-writer/1.0 (+http://localhost)",
     )
     AGENT_MEMORY_SESSION_MESSAGE_LIMIT = int(os.getenv("AGENT_MEMORY_SESSION_MESSAGE_LIMIT", "6"))
     AGENT_MEMORY_CROSS_SESSION_MESSAGE_LIMIT = int(os.getenv("AGENT_MEMORY_CROSS_SESSION_MESSAGE_LIMIT", "8"))

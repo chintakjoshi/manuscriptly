@@ -5,7 +5,7 @@ from flasgger import Swagger
 SWAGGER_TEMPLATE = {
     "swagger": "2.0",
     "info": {
-        "title": "kaka-the-writer API",
+        "title": "manuscriptly-the-writer API",
         "description": "Backend API for users, sessions, plans, messages, stream, and agent chat.",
         "version": "1.0.0",
     },
@@ -282,7 +282,7 @@ SWAGGER_TEMPLATE = {
 
 def init_swagger(app) -> None:
     app.config["SWAGGER"] = {
-        "title": "kaka-the-writer API Docs",
+        "title": "manuscriptly-the-writer API Docs",
         "uiversion": 3,
     }
     Swagger(app, template=SWAGGER_TEMPLATE)

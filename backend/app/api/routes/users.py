@@ -42,7 +42,7 @@ def _build_generated_email(user_name: str) -> str:
     slug = re.sub(r"[^a-z0-9]+", "-", user_name.lower()).strip("-")
     if not slug:
         slug = "writer"
-    return f"{slug}-{uuid4().hex[:10]}@local.kaka"
+    return f"{slug}-{uuid4().hex[:10]}@local.manuscriptly"
 
 
 @users_bp.post("/onboarding")
