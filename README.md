@@ -1,4 +1,4 @@
-# kaka-the-writer
+# manuscriptly-the-writer
 
 Local-first prototype for an agentic blog writing workspace.
 
@@ -8,10 +8,6 @@ The app pairs a chat interface with a dynamic workspace:
 - Left side: session-based chat with live agent/tool activity.
 - Right side: brainstorming plans and generated content drafts.
 - Backend agent: tool-calling loop (`create_content_idea`, `update_content_plan`, `execute_plan`, `web_search`).
-
-## Current Scope
-
-Implemented through Phase 10 Step 30 (Step 27 intentionally skipped).
 
 Highlights:
 - Onboarding + user/company context memory.
@@ -84,7 +80,7 @@ Services:
 Default Postgres credentials:
 - user: `postgres`
 - password: `postgres`
-- database: `kaka_writer`
+- database: `manuscriptly_writer`
 
 Stop services:
 

@@ -5,13 +5,13 @@ services:
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: kaka_writer
+      POSTGRES_DB: manuscriptly_writer
     ports:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d kaka_writer"]
+      test: ["CMD-SHELL", "pg_isready -U postgres -d manuscriptly_writer"]
       interval: 5s
       timeout: 5s
       retries: 20
@@ -27,11 +27,7 @@ services:
       FLASK_ENV: development
       FLASK_DEBUG: "0"
       CORS_ORIGINS: http://localhost:5173
-      DATABASE_URL: postgresql+psycopg://postgres:postgres@postgres:5432/kaka_writer
-      SEED_DEFAULT_SUPERUSER: "1"
-      DEFAULT_SUPERUSER_USER_NAME: admin
-      DEFAULT_SUPERUSER_EMAIL: admin@example.com
-      DEFAULT_SUPERUSER_PASSWORD: admin123
+      DATABASE_URL: postgresql+psycopg://postgres:postgres@postgres:5432/manuscriptly_writer
     depends_on:
       postgres:
         condition: service_healthy

@@ -8,18 +8,14 @@ load_dotenv(dotenv_path=BACKEND_ROOT / ".env")
 
 
 class Config:
-    APP_NAME = os.getenv("APP_NAME", "kaka-the-writer-backend")
+    APP_NAME = os.getenv("APP_NAME", "manuscriptly-the-writer-backend")
     ENV = os.getenv("FLASK_ENV", "development")
     DEBUG = os.getenv("FLASK_DEBUG", "1") == "1"
     CORS_ORIGINS = [origin.strip() for origin in os.getenv("CORS_ORIGINS", "http://localhost:5173").split(",")]
-    SEED_DEFAULT_SUPERUSER = os.getenv("SEED_DEFAULT_SUPERUSER", "1") == "1"
-    DEFAULT_SUPERUSER_USER_NAME = os.getenv("DEFAULT_SUPERUSER_USER_NAME", "admin")
-    DEFAULT_SUPERUSER_EMAIL = os.getenv("DEFAULT_SUPERUSER_EMAIL", "admin@example.com")
-    DEFAULT_SUPERUSER_PASSWORD = os.getenv("DEFAULT_SUPERUSER_PASSWORD", "admin123")
 
     DATABASE_URL = os.getenv(
         "DATABASE_URL",
-        "postgresql+psycopg://postgres:postgres@localhost:5432/kaka_writer",
+        "postgresql+psycopg://postgres:postgres@localhost:5432/manuscriptly_writer",
     )
     ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
     ANTHROPIC_MODEL = os.getenv("ANTHROPIC_MODEL", "claude-haiku-4-5-20251001")
@@ -34,7 +30,7 @@ class Config:
     WEB_SEARCH_MAX_RESULTS = int(os.getenv("WEB_SEARCH_MAX_RESULTS", "5"))
     WEB_SEARCH_USER_AGENT = os.getenv(
         "WEB_SEARCH_USER_AGENT",
-        "kaka-the-writer/1.0 (+http://localhost)",
+        "manuscriptly-the-writer/1.0 (+http://localhost)",
     )
     AGENT_MEMORY_SESSION_MESSAGE_LIMIT = int(os.getenv("AGENT_MEMORY_SESSION_MESSAGE_LIMIT", "6"))
     AGENT_MEMORY_CROSS_SESSION_MESSAGE_LIMIT = int(os.getenv("AGENT_MEMORY_CROSS_SESSION_MESSAGE_LIMIT", "8"))

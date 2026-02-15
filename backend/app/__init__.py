@@ -5,7 +5,6 @@ from werkzeug.exceptions import HTTPException
 
 from app.api.routes import agent_bp, content_bp, messages_bp, plans_bp, sessions_bp, stream_bp, users_bp
 from app.api.swagger import init_swagger
-from app.core.bootstrap import seed_default_superuser
 
 
 def create_app() -> Flask:
@@ -23,7 +22,6 @@ def create_app() -> Flask:
     app.register_blueprint(users_bp)
     app.register_blueprint(content_bp)
     register_error_handlers(app)
-    seed_default_superuser()
 
     return app
 
