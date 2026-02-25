@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent } from "react";
+import { TbLayoutSidebarLeftCollapse } from "react-icons/tb";
+import { GoSidebarCollapse } from "react-icons/go";
 
 import { ChatInput } from "./components/chat/ChatInput";
 import { ChatMessageList } from "./components/chat/ChatMessageList";
@@ -1240,9 +1242,9 @@ export default function App() {
             <button
               type="button"
               onClick={() => setIsSessionsCollapsed(false)}
-              className="rounded-full bg-[#2e3542] px-2 py-1 text-sm font-semibold text-[var(--text-secondary)] hover:bg-[#3a4354]"
+              className="rounded-full bg-[#2e3542] px-2 py-1 font-semibold text-[var(--text-secondary)] hover:bg-[#3a4354]"
             >
-              {">"}
+              <GoSidebarCollapse />
             </button>
           </div>
           <div
@@ -1257,9 +1259,9 @@ export default function App() {
                 <button
                   type="button"
                   onClick={() => setIsSessionsCollapsed(true)}
-                  className="rounded-full bg-[#2e3542] px-2 py-1 text-xs font-semibold text-[var(--text-secondary)] hover:bg-[#3a4354]"
+                  className="rounded-full bg-[#2e3542] px-2 py-1 font-semibold text-[var(--text-secondary)] hover:bg-[#3a4354]"
                 >
-                  {"<"}
+                  <TbLayoutSidebarLeftCollapse />
                 </button>
               </div>
 
