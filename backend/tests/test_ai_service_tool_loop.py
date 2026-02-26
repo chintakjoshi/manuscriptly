@@ -5,7 +5,7 @@ from types import SimpleNamespace
 from uuid import UUID, uuid4
 
 import httpx
-from anthropic import APIConnectionError
+from openai import APIConnectionError
 from pydantic import BaseModel
 
 from app.agent_tools import ToolDefinition, ToolExecutionRouter, ToolRegistry

@@ -5,8 +5,7 @@ import re
 from time import perf_counter
 from typing import Any
 
-from anthropic import Anthropic
-from anthropic import APIConnectionError, APIError, APITimeoutError
+from openai import APIConnectionError, APIError, APITimeoutError, OpenAI
 from sqlalchemy.orm import Session
 
 from app.agent_tools.schemas import CreateContentIdeaInput, ExecutePlanInput, UpdateContentPlanInput, WebSearchInput
@@ -26,6 +25,13 @@ class ToolNotFoundError(ToolHandlerError):
 
 class ToolValidationError(ToolHandlerError):
     pass
+
+
+def _get_ai_client() -> OpenAI | None:
+    api_key = Config.NIM_API_KEY.strip()
+    if not api_key or api_key == "your_nvidia_nim_api_key":
+        return None
+    return OpenAI(api_key=api_key, base_url=Config.NIM_BASE_URL)
 
 
 def handle_create_content_idea(payload: CreateContentIdeaInput) -> dict[str, Any]:
@@ -260,8 +266,8 @@ def _generate_plan_with_ai(
     constraints: dict[str, Any] | None,
     user_context: dict[str, Any],
 ) -> dict[str, Any] | None:
-    api_key = Config.ANTHROPIC_API_KEY.strip()
-    if not api_key or api_key == "your_anthropic_api_key":
+    client = _get_ai_client()
+    if client is None:
         return None
 
     prompt = (
@@ -277,13 +283,14 @@ def _generate_plan_with_ai(
     )
 
     try:
-        client = Anthropic(api_key=api_key)
-        response = client.messages.create(
-            model=Config.ANTHROPIC_MODEL,
-            max_tokens=Config.ANTHROPIC_MAX_TOKENS,
-            temperature=Config.ANTHROPIC_TEMPERATURE,
-            system="You are a precise content strategist. Follow output format exactly.",
-            messages=[{"role": "user", "content": prompt}],
+        response = client.chat.completions.create(
+            model=Config.NIM_MODEL,
+            max_tokens=Config.AI_MAX_TOKENS,
+            temperature=Config.AI_TEMPERATURE,
+            messages=[
+                {"role": "system", "content": "You are a precise content strategist. Follow output format exactly."},
+                {"role": "user", "content": prompt},
+            ],
         )
         text = _extract_text_from_response(response)
         return _parse_json_from_text(text)
@@ -297,8 +304,8 @@ def _generate_blog_with_ai(
     output_format: str,
     user_context: dict[str, Any],
 ) -> dict[str, Any] | None:
-    api_key = Config.ANTHROPIC_API_KEY.strip()
-    if not api_key or api_key == "your_anthropic_api_key":
+    client = _get_ai_client()
+    if client is None:
         return None
 
     prompt = (
@@ -316,13 +323,14 @@ def _generate_blog_with_ai(
     )
 
     try:
-        client = Anthropic(api_key=api_key)
-        response = client.messages.create(
-            model=Config.ANTHROPIC_MODEL,
-            max_tokens=Config.ANTHROPIC_MAX_TOKENS,
-            temperature=Config.ANTHROPIC_TEMPERATURE,
-            system="You are a senior blog writer. Follow output format exactly.",
-            messages=[{"role": "user", "content": prompt}],
+        response = client.chat.completions.create(
+            model=Config.NIM_MODEL,
+            max_tokens=Config.AI_MAX_TOKENS,
+            temperature=Config.AI_TEMPERATURE,
+            messages=[
+                {"role": "system", "content": "You are a senior blog writer. Follow output format exactly."},
+                {"role": "user", "content": prompt},
+            ],
         )
         text = _extract_text_from_response(response)
         parsed = _coerce_blog_payload_from_text(text, plan)
@@ -343,7 +351,7 @@ def _generate_blog_with_ai(
 
 
 def _generate_blog_markdown_retry_with_ai(
-    client: Anthropic,
+    client: OpenAI,
     plan: ContentPlan,
     writing_instructions: str | None,
     user_context: dict[str, Any],
@@ -360,12 +368,14 @@ def _generate_blog_markdown_retry_with_ai(
         f"User context (JSON):\n{json.dumps(user_context, ensure_ascii=True)}"
     )
     try:
-        response = client.messages.create(
-            model=Config.ANTHROPIC_MODEL,
-            max_tokens=Config.ANTHROPIC_MAX_TOKENS,
-            temperature=Config.ANTHROPIC_TEMPERATURE,
-            system="You are a senior blog writer. Return markdown only.",
-            messages=[{"role": "user", "content": prompt}],
+        response = client.chat.completions.create(
+            model=Config.NIM_MODEL,
+            max_tokens=Config.AI_MAX_TOKENS,
+            temperature=Config.AI_TEMPERATURE,
+            messages=[
+                {"role": "system", "content": "You are a senior blog writer. Return markdown only."},
+                {"role": "user", "content": prompt},
+            ],
         )
         return _extract_text_from_response(response)
     except (APIError, APIConnectionError, APITimeoutError, ToolHandlerError):
@@ -436,6 +446,13 @@ def _generate_blog_fallback(
 
 
 def _extract_text_from_response(response: Any) -> str:
+    choices = getattr(response, "choices", None)
+    if isinstance(choices, list) and choices:
+        message = getattr(choices[0], "message", None)
+        text = (getattr(message, "content", None) or "").strip() if message is not None else ""
+        if text:
+            return text
+
     text_parts: list[str] = []
     for block in getattr(response, "content", []):
         if getattr(block, "type", None) == "text":

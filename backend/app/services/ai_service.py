@@ -7,8 +7,7 @@ from collections.abc import Callable
 from typing import Any
 from uuid import UUID
 
-from anthropic import Anthropic
-from anthropic import APIConnectionError, APIError, APITimeoutError
+from openai import APIConnectionError, APIError, APITimeoutError, OpenAI
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -71,7 +70,7 @@ class AIService:
 
     def __init__(self, db: Session) -> None:
         self.db = db
-        self._client: Anthropic | None = None
+        self._client: OpenAI | None = None
         self.tool_registry: ToolRegistry = build_default_tool_registry()
         self.tool_router = ToolExecutionRouter(registry=self.tool_registry)
         self.memory_service = AgentMemoryService(db)
@@ -102,7 +101,7 @@ class AIService:
         conversation_messages: list[dict[str, Any]] = list(history)
         auto_tool_attempted = False
 
-        for iteration in range(1, Config.ANTHROPIC_MAX_TOOL_ITERATIONS + 1):
+        for iteration in range(1, Config.AI_MAX_TOOL_ITERATIONS + 1):
             try:
                 response = self._create_completion_with_retry(
                     system_prompt=system_prompt,
@@ -136,14 +135,14 @@ class AIService:
 
                 assistant_text = assistant_text_candidate
                 if not assistant_text:
-                    raise AICompletionError("Anthropic response did not include assistant text.")
+                    raise AICompletionError("AI response did not include assistant text.")
 
                 context_used = {
-                    "provider": "anthropic",
-                    "model": Config.ANTHROPIC_MODEL,
+                    "provider": "nvidia_nim",
+                    "model": Config.NIM_MODEL,
                     "user_context": user_context,
                     "memory_snapshot": memory_snapshot,
-                    "registered_tools": [tool["name"] for tool in self.tool_registry.list_anthropic_tools()],
+                    "registered_tools": [tool["function"]["name"] for tool in self.tool_registry.list_openai_tools()],
                     "tool_calls_count": len(tool_calls_log),
                     "tool_results_count": len(tool_results_log),
                     "tool_iterations": iteration,
@@ -166,8 +165,7 @@ class AIService:
                     },
                 )
 
-            conversation_messages.append({"role": "assistant", "content": parsed["assistant_blocks"]})
-            tool_result_blocks: list[dict[str, Any]] = []
+            conversation_messages.append(parsed["assistant_message"])
             for tool_use in parsed["tool_uses"]:
                 normalized_tool_input = self._normalize_tool_input(
                     tool_name=tool_use["name"],
@@ -244,20 +242,15 @@ class AIService:
                 tool_results_log.append(tool_result_entry)
 
                 tool_result_payload_for_model = self._sanitize_tool_payload(tool_result_payload)
-                result_block: dict[str, Any] = {
-                    "type": "tool_result",
-                    "tool_use_id": tool_use["id"],
-                    "content": json.dumps(tool_result_payload_for_model, default=str),
-                }
-                if is_error:
-                    result_block["is_error"] = True
-                tool_result_blocks.append(result_block)
+                conversation_messages.append(
+                    {
+                        "role": "tool",
+                        "tool_call_id": tool_use["id"],
+                        "content": json.dumps(tool_result_payload_for_model, default=str),
+                    }
+                )
 
-            conversation_messages.append({"role": "user", "content": tool_result_blocks})
-
-        raise AICompletionError(
-            f"Tool execution loop exceeded {Config.ANTHROPIC_MAX_TOOL_ITERATIONS} iterations without final text."
-        )
+        raise AICompletionError(f"Tool execution loop exceeded {Config.AI_MAX_TOOL_ITERATIONS} iterations without final text.")
 
     def _create_completion_with_retry(
         self,
@@ -267,14 +260,24 @@ class AIService:
         iteration: int,
         event_callback: Callable[[str, dict[str, Any]], None] | None = None,
     ) -> Any:
-        max_attempts = max(Config.ANTHROPIC_RETRY_MAX_ATTEMPTS, 1)
-        base_delay = max(Config.ANTHROPIC_RETRY_BASE_DELAY_SECONDS, 0.0)
-        max_delay = max(Config.ANTHROPIC_RETRY_MAX_DELAY_SECONDS, 0.0)
+        max_attempts = max(Config.AI_RETRY_MAX_ATTEMPTS, 1)
+        base_delay = max(Config.AI_RETRY_BASE_DELAY_SECONDS, 0.0)
+        max_delay = max(Config.AI_RETRY_MAX_DELAY_SECONDS, 0.0)
         last_error: Exception | None = None
 
         for attempt in range(1, max_attempts + 1):
             try:
-                return self._get_client().messages.create(
+                client = self._get_client()
+                if hasattr(client, "chat") and hasattr(client.chat, "completions"):
+                    return client.chat.completions.create(
+                        model=Config.NIM_MODEL,
+                        max_tokens=Config.AI_MAX_TOKENS,
+                        temperature=Config.AI_TEMPERATURE,
+                        messages=[{"role": "system", "content": system_prompt}, *conversation_messages],
+                        tools=self.tool_registry.list_openai_tools(),
+                        tool_choice="auto",
+                    )
+                return client.messages.create(
                     model=Config.ANTHROPIC_MODEL,
                     max_tokens=Config.ANTHROPIC_MAX_TOKENS,
                     temperature=Config.ANTHROPIC_TEMPERATURE,
@@ -504,15 +507,15 @@ class AIService:
         return str(plan) if plan else None
 
     def get_registered_tools(self) -> list[dict[str, Any]]:
-        return self.tool_registry.list_anthropic_tools()
+        return self.tool_registry.list_openai_tools()
 
-    def _get_client(self) -> Anthropic:
+    def _get_client(self) -> OpenAI:
         if self._client is not None:
             return self._client
-        api_key = Config.ANTHROPIC_API_KEY.strip()
-        if not api_key or api_key == "your_anthropic_api_key":
-            raise AIConfigurationError("ANTHROPIC_API_KEY is not configured.")
-        self._client = Anthropic(api_key=api_key)
+        api_key = Config.NIM_API_KEY.strip()
+        if not api_key or api_key == "your_nvidia_nim_api_key":
+            raise AIConfigurationError("NIM_API_KEY is not configured.")
+        self._client = OpenAI(api_key=api_key, base_url=Config.NIM_BASE_URL)
         return self._client
 
     def _build_anthropic_history(self, conversation_id: UUID) -> list[dict[str, Any]]:
@@ -609,7 +612,7 @@ class AIService:
 
         text = "\n".join(text_parts).strip()
         if not text:
-            raise AICompletionError("Anthropic response did not include assistant text.")
+            raise AICompletionError("AI response did not include assistant text.")
         return text
 
     @staticmethod
@@ -692,6 +695,55 @@ class AIService:
 
     @staticmethod
     def _parse_response_blocks(response: Any) -> dict[str, Any]:
+        # OpenAI-compatible chat completion response (used by NVIDIA NIM).
+        choices = getattr(response, "choices", None)
+        if isinstance(choices, list) and choices:
+            message = getattr(choices[0], "message", None)
+            if message is None:
+                raise AICompletionError("AI response did not include a message.")
+
+            text = (getattr(message, "content", None) or "").strip()
+            tool_uses: list[dict[str, Any]] = []
+            assistant_tool_calls: list[dict[str, Any]] = []
+            raw_tool_calls = getattr(message, "tool_calls", None) or []
+            for idx, tool_call in enumerate(raw_tool_calls):
+                function_data = getattr(tool_call, "function", None)
+                tool_name = getattr(function_data, "name", None)
+                if not tool_name:
+                    raise AICompletionError("Tool call missing tool name.")
+                raw_arguments = getattr(function_data, "arguments", "{}") or "{}"
+                try:
+                    tool_input = json.loads(raw_arguments)
+                except json.JSONDecodeError as exc:
+                    raise AICompletionError(f"Tool call arguments for '{tool_name}' were not valid JSON.") from exc
+                if not isinstance(tool_input, dict):
+                    raise AICompletionError("Tool call arguments must decode to a JSON object.")
+                tool_use_id = str(getattr(tool_call, "id", f"tool_call_{idx + 1}"))
+                tool_uses.append({"id": tool_use_id, "name": str(tool_name), "input": tool_input})
+                assistant_tool_calls.append(
+                    {
+                        "id": tool_use_id,
+                        "type": "function",
+                        "function": {
+                            "name": str(tool_name),
+                            "arguments": json.dumps(tool_input, ensure_ascii=True),
+                        },
+                    }
+                )
+
+            if not text and not tool_uses:
+                raise AICompletionError("AI response did not include assistant text or tool calls.")
+            return {
+                "text": text,
+                "tool_uses": tool_uses,
+                "assistant_message": {
+                    "role": "assistant",
+                    "content": text,
+                    "tool_calls": assistant_tool_calls or None,
+                },
+            }
+
+        # Legacy Anthropcic response format (kept for tests/mocks compatibility).
         tool_uses: list[dict[str, Any]] = []
         assistant_blocks: list[dict[str, Any]] = []
         text_parts: list[str] = []
@@ -728,8 +780,12 @@ class AIService:
 
         text = "\n".join(text_parts).strip()
         if not assistant_blocks:
-            raise AICompletionError("Anthropic response did not include recognized content blocks.")
-        return {"text": text, "tool_uses": tool_uses, "assistant_blocks": assistant_blocks}
+            raise AICompletionError("AI response did not include recognized content blocks.")
+        return {
+            "text": text,
+            "tool_uses": tool_uses,
+            "assistant_message": {"role": "assistant", "content": assistant_blocks},
+        }
 
     def _maybe_autorun_intent_tool(
         self,
@@ -800,7 +856,6 @@ class AIService:
         tool_calls_log.append(tool_call_entry)
 
         tool_status = "completed"
-        is_error = False
         try:
             execution = self.tool_router.execute(tool_name, normalized_tool_input)
             tool_result_payload = execution["result"]
@@ -821,7 +876,6 @@ class AIService:
         except ToolExecutionError as exc:
             tool_result_payload = {"error": str(exc)}
             tool_status = "failed"
-            is_error = True
             if event_callback:
                 event_callback(
                     "agent.tool.failed",
@@ -845,28 +899,29 @@ class AIService:
         tool_results_log.append(tool_result_entry)
 
         tool_result_payload_for_model = self._sanitize_tool_payload(tool_result_payload)
-        result_block: dict[str, Any] = {
-            "type": "tool_result",
-            "tool_use_id": tool_use_id,
-            "content": json.dumps(tool_result_payload_for_model, default=str),
-        }
-        if is_error:
-            result_block["is_error"] = True
-
         conversation_messages.append(
             {
                 "role": "assistant",
-                "content": [
+                "content": "",
+                "tool_calls": [
                     {
-                        "type": "tool_use",
                         "id": tool_use_id,
-                        "name": tool_name,
-                        "input": normalized_tool_input,
+                        "type": "function",
+                        "function": {
+                            "name": tool_name,
+                            "arguments": json.dumps(normalized_tool_input, ensure_ascii=True),
+                        },
                     }
                 ],
             }
         )
-        conversation_messages.append({"role": "user", "content": [result_block]})
+        conversation_messages.append(
+            {
+                "role": "tool",
+                "tool_call_id": tool_use_id,
+                "content": json.dumps(tool_result_payload_for_model, default=str),
+            }
+        )
         return True
 
     @staticmethod

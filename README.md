@@ -22,7 +22,7 @@ Highlights:
 ## Tech Stack
 
 - Frontend: React + TypeScript + Vite + Tailwind CSS
-- Backend: Flask + SQLAlchemy + Alembic + Pydantic + Anthropic SDK
+- Backend: Flask + SQLAlchemy + Alembic + Pydantic + OpenAI SDK (for NVIDIA NIM)
 - Database: PostgreSQL
 
 ## Prerequisites
@@ -42,12 +42,12 @@ copy .env.example .env
 ```
 
 Required for AI replies:
-- Set `ANTHROPIC_API_KEY` in `backend/.env`
+- Set `NIM_API_KEY` in `backend/.env`
 
 Key backend env values:
 - `DATABASE_URL`
 - `CORS_ORIGINS`
-- `ANTHROPIC_MODEL`
+- `NIM_MODEL`
 - `WEB_SEARCH_MAX_RESULTS`
 
 ### Frontend env
