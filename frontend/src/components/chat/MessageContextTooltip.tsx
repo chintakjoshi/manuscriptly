@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 
 type MessageContextTooltipProps = {
   contextUsed: Record<string, unknown>;
@@ -80,20 +81,68 @@ function getMemoryFacts(value: unknown): ContextFact[] {
 
 export function MessageContextTooltip({ contextUsed, messageId }: MessageContextTooltipProps) {
   const [open, setOpen] = useState(false);
-  const containerRef = useRef<HTMLDivElement | null>(null);
+  const [panelPosition, setPanelPosition] = useState<{ top: number; left: number } | null>(null);
+  const buttonRef = useRef<HTMLButtonElement | null>(null);
+  const panelRef = useRef<HTMLElement | null>(null);
 
   useEffect(() => {
     if (!open) {
       return;
     }
     const handlePointerDown = (event: MouseEvent) => {
-      if (!containerRef.current?.contains(event.target as Node)) {
+      const target = event.target as Node;
+      const clickedTrigger = buttonRef.current?.contains(target);
+      const clickedPanel = panelRef.current?.contains(target);
+      if (!clickedTrigger && !clickedPanel) {
         setOpen(false);
       }
     };
     document.addEventListener("mousedown", handlePointerDown);
     return () => {
       document.removeEventListener("mousedown", handlePointerDown);
+    };
+  }, [open]);
+
+  useLayoutEffect(() => {
+    if (!open) {
+      setPanelPosition(null);
+      return;
+    }
+
+    const updatePosition = () => {
+      const button = buttonRef.current;
+      if (!button) {
+        return;
+      }
+
+      const rect = button.getBoundingClientRect();
+      const viewportPadding = 16;
+      const preferredWidth = 320;
+      const maxWidth = Math.min(preferredWidth, window.innerWidth - viewportPadding * 2);
+      const panelWidth = panelRef.current?.offsetWidth ?? maxWidth;
+      const panelHeight = panelRef.current?.offsetHeight ?? 0;
+      const spaceBelow = window.innerHeight - rect.bottom - viewportPadding;
+      const spaceAbove = rect.top - viewportPadding;
+      const top =
+        panelHeight > 0 && spaceBelow < panelHeight + 8 && spaceAbove > spaceBelow
+          ? Math.max(viewportPadding, rect.top - panelHeight - 8)
+          : Math.min(window.innerHeight - viewportPadding, rect.bottom + 8);
+      const left = Math.min(
+        Math.max(viewportPadding, rect.right - panelWidth),
+        window.innerWidth - panelWidth - viewportPadding,
+      );
+
+      setPanelPosition({ top, left });
+    };
+
+    updatePosition();
+    const rafId = window.requestAnimationFrame(updatePosition);
+    window.addEventListener("resize", updatePosition);
+    window.addEventListener("scroll", updatePosition, true);
+    return () => {
+      window.cancelAnimationFrame(rafId);
+      window.removeEventListener("resize", updatePosition);
+      window.removeEventListener("scroll", updatePosition, true);
     };
   }, [open]);
 
@@ -131,8 +180,9 @@ export function MessageContextTooltip({ contextUsed, messageId }: MessageContext
   ].filter((tag): tag is string => Boolean(tag));
 
   return (
-    <div ref={containerRef} className="relative">
+    <div className="relative">
       <button
+        ref={buttonRef}
         type="button"
         className="inline-flex items-center gap-1 rounded-full bg-[var(--accent-soft)] px-2 py-0.5 text-[11px] font-semibold text-[#8de4c8] hover:bg-[var(--accent-soft)]/80"
         aria-expanded={open}
@@ -148,99 +198,110 @@ export function MessageContextTooltip({ contextUsed, messageId }: MessageContext
         <span>Context DNA</span>
       </button>
 
-      {open && (
-        <aside
-          id={`context-popover-${messageId}`}
-          className="absolute right-0 z-20 mt-2 w-[320px] max-w-[calc(100vw-3rem)] rounded-2xl bg-[#212833] p-3 text-xs text-[var(--text-secondary)] shadow-2xl"
-        >
-          <div className="flex items-start justify-between gap-2">
-            <p className="font-semibold text-[var(--text-primary)]">Response Context</p>
-            <button
-              type="button"
-              onClick={() => setOpen(false)}
-              className="rounded-md bg-[#2a313d] px-1.5 py-0.5 text-[10px] font-semibold text-[var(--text-secondary)] hover:bg-[#313a48]"
-            >
-              Close
-            </button>
-          </div>
-
-          {influenceTags.length > 0 && (
-            <div className="mt-2 flex flex-wrap gap-1">
-              {influenceTags.map((tag) => (
-                <span key={tag} className="rounded-full bg-[#2b3340] px-2 py-0.5 text-[10px] font-semibold text-[var(--text-secondary)]">
-                  {tag}
-                </span>
-              ))}
+      {open &&
+        createPortal(
+          <aside
+            ref={panelRef}
+            id={`context-popover-${messageId}`}
+            className="fixed z-[120] w-[320px] max-w-[calc(100vw-2rem)] rounded-2xl bg-[#212833] p-3 text-xs text-[var(--text-secondary)] shadow-2xl"
+            style={
+              panelPosition
+                ? {
+                    top: `${panelPosition.top}px`,
+                    left: `${panelPosition.left}px`,
+                  }
+                : { visibility: "hidden" }
+            }
+          >
+            <div className="flex items-start justify-between gap-2">
+              <p className="font-semibold text-[var(--text-primary)]">Response Context</p>
+              <button
+                type="button"
+                onClick={() => setOpen(false)}
+                className="rounded-md bg-[#2a313d] px-1.5 py-0.5 text-[10px] font-semibold text-[var(--text-secondary)] hover:bg-[#313a48]"
+              >
+                Close
+              </button>
             </div>
-          )}
 
-          {(provider || model) && (
-            <p className="mt-2 text-[11px] text-[var(--text-tertiary)]">
-              {provider ?? "provider"}
-              {model ? ` - ${model}` : ""}
-            </p>
-          )}
+            {influenceTags.length > 0 && (
+              <div className="mt-2 flex flex-wrap gap-1">
+                {influenceTags.map((tag) => (
+                  <span key={tag} className="rounded-full bg-[#2b3340] px-2 py-0.5 text-[10px] font-semibold text-[var(--text-secondary)]">
+                    {tag}
+                  </span>
+                ))}
+              </div>
+            )}
 
-          {profileFacts.length > 0 && (
-            <section className="mt-3">
-              <p className="font-semibold text-[var(--text-primary)]">User Context Used</p>
-              <ul className="mt-1 space-y-1">
-                {profileFacts.map((fact) => (
-                  <li key={`profile-${fact.label}`}>
-                    <span className="font-medium text-[var(--text-primary)]">{fact.label}:</span> {fact.value}
-                  </li>
-                ))}
-              </ul>
-            </section>
-          )}
-
-          {(knownProfileFacts.length > 0 || inferredFacts.length > 0) && (
-            <section className="mt-3">
-              <p className="font-semibold text-[var(--text-primary)]">Memory Signals</p>
-              <ul className="mt-1 space-y-1">
-                {knownProfileFacts.map((fact) => (
-                  <li key={`known-${fact.label}-${fact.value}`}>
-                    <span className="font-medium text-[var(--text-primary)]">{fact.label}:</span> {fact.value}
-                  </li>
-                ))}
-                {inferredFacts.map((fact) => (
-                  <li key={`inferred-${fact.label}-${fact.value}`}>
-                    <span className="font-medium text-[var(--text-primary)]">{fact.label}:</span> {fact.value}
-                  </li>
-                ))}
-              </ul>
-            </section>
-          )}
-
-          {(sessionIntents.length > 0 || crossSessionIntents.length > 0) && (
-            <section className="mt-3">
-              <p className="font-semibold text-[var(--text-primary)]">Intent Memory</p>
-              <ul className="mt-1 space-y-1">
-                {sessionIntents.map((intent) => (
-                  <li key={`session-intent-${intent}`}>{intent}</li>
-                ))}
-                {crossSessionIntents.map((intent) => (
-                  <li key={`cross-intent-${intent}`}>{intent}</li>
-                ))}
-              </ul>
-            </section>
-          )}
-
-          <section className="mt-3 border-t border-[#323949] pt-2 text-[11px] text-[var(--text-secondary)]">
-            <p>
-              Tool calls in this response: <span className="font-semibold text-[var(--text-primary)]">{toolCallsCount}</span>
-            </p>
-            {toolIterations ? (
-              <p>
-                Tool loop iterations: <span className="font-semibold text-[var(--text-primary)]">{toolIterations}</span>
+            {(provider || model) && (
+              <p className="mt-2 text-[11px] text-[var(--text-tertiary)]">
+                {provider ?? "provider"}
+                {model ? ` - ${model}` : ""}
               </p>
-            ) : null}
-            {registeredTools.length > 0 ? (
-              <p className="mt-1">Available tools: {registeredTools.join(", ")}</p>
-            ) : null}
-          </section>
-        </aside>
-      )}
+            )}
+
+            {profileFacts.length > 0 && (
+              <section className="mt-3">
+                <p className="font-semibold text-[var(--text-primary)]">User Context Used</p>
+                <ul className="mt-1 space-y-1">
+                  {profileFacts.map((fact) => (
+                    <li key={`profile-${fact.label}`}>
+                      <span className="font-medium text-[var(--text-primary)]">{fact.label}:</span> {fact.value}
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            )}
+
+            {(knownProfileFacts.length > 0 || inferredFacts.length > 0) && (
+              <section className="mt-3">
+                <p className="font-semibold text-[var(--text-primary)]">Memory Signals</p>
+                <ul className="mt-1 space-y-1">
+                  {knownProfileFacts.map((fact) => (
+                    <li key={`known-${fact.label}-${fact.value}`}>
+                      <span className="font-medium text-[var(--text-primary)]">{fact.label}:</span> {fact.value}
+                    </li>
+                  ))}
+                  {inferredFacts.map((fact) => (
+                    <li key={`inferred-${fact.label}-${fact.value}`}>
+                      <span className="font-medium text-[var(--text-primary)]">{fact.label}:</span> {fact.value}
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            )}
+
+            {(sessionIntents.length > 0 || crossSessionIntents.length > 0) && (
+              <section className="mt-3">
+                <p className="font-semibold text-[var(--text-primary)]">Intent Memory</p>
+                <ul className="mt-1 space-y-1">
+                  {sessionIntents.map((intent) => (
+                    <li key={`session-intent-${intent}`}>{intent}</li>
+                  ))}
+                  {crossSessionIntents.map((intent) => (
+                    <li key={`cross-intent-${intent}`}>{intent}</li>
+                  ))}
+                </ul>
+              </section>
+            )}
+
+            <section className="mt-3 border-t border-[#323949] pt-2 text-[11px] text-[var(--text-secondary)]">
+              <p>
+                Tool calls in this response: <span className="font-semibold text-[var(--text-primary)]">{toolCallsCount}</span>
+              </p>
+              {toolIterations ? (
+                <p>
+                  Tool loop iterations: <span className="font-semibold text-[var(--text-primary)]">{toolIterations}</span>
+                </p>
+              ) : null}
+              {registeredTools.length > 0 ? (
+                <p className="mt-1">Available tools: {registeredTools.join(", ")}</p>
+              ) : null}
+            </section>
+          </aside>,
+          document.body,
+        )}
     </div>
   );
 }
