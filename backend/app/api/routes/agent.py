@@ -24,7 +24,7 @@ agent_bp = Blueprint("agent", __name__, url_prefix="/api/v1/agent")
 @agent_bp.post("/chat")
 def chat_with_agent():
     """
-    Create user message and generate assistant reply via Anthropic
+    Create user message and generate assistant reply via AI provider
     ---
     tags:
       - Agent
@@ -48,11 +48,11 @@ def chat_with_agent():
         schema:
           $ref: '#/definitions/ErrorResponse'
       500:
-        description: Anthropic configuration missing.
+        description: AI provider configuration missing.
         schema:
           $ref: '#/definitions/ErrorResponse'
       502:
-        description: Anthropic completion failed.
+        description: AI provider completion failed.
         schema:
           $ref: '#/definitions/ErrorResponse'
     """
@@ -86,7 +86,7 @@ def chat_with_agent():
         sse_manager.publish("message.created", user_payload, session_id=session_id)
         sse_manager.publish(
             "agent.response.started",
-            {"conversation_id": session_id, "model": Config.ANTHROPIC_MODEL},
+            {"conversation_id": session_id, "model": Config.NIM_MODEL},
             session_id=session_id,
         )
 
@@ -141,7 +141,7 @@ def chat_with_agent():
             {
                 "conversation_id": session_id,
                 "assistant_message_id": assistant_payload["id"],
-                "model": Config.ANTHROPIC_MODEL,
+                "model": Config.NIM_MODEL,
             },
             session_id=session_id,
         )
@@ -151,7 +151,7 @@ def chat_with_agent():
                 {
                     "user_message": user_payload,
                     "assistant_message": assistant_payload,
-                    "model": Config.ANTHROPIC_MODEL,
+                    "model": Config.NIM_MODEL,
                 }
             ),
             201,

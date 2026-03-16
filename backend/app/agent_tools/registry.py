@@ -34,6 +34,16 @@ class ToolDefinition:
             "input_schema": self.input_model.model_json_schema(),
         }
 
+    def to_openai_tool(self) -> dict[str, Any]:
+        return {
+            "type": "function",
+            "function": {
+                "name": self.name,
+                "description": self.description,
+                "parameters": self.input_model.model_json_schema(),
+            },
+        }
+
 
 class ToolRegistry:
     def __init__(self) -> None:
@@ -55,3 +65,6 @@ class ToolRegistry:
 
     def list_anthropic_tools(self) -> list[dict[str, Any]]:
         return [tool.to_anthropic_tool() for tool in self._tools.values()]
+
+    def list_openai_tools(self) -> list[dict[str, Any]]:
+        return [tool.to_openai_tool() for tool in self._tools.values()]

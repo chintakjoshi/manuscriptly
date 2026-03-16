@@ -17,14 +17,33 @@ class Config:
         "DATABASE_URL",
         "postgresql+psycopg://postgres:postgres@localhost:5432/manuscriptly_writer",
     )
-    ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
-    ANTHROPIC_MODEL = os.getenv("ANTHROPIC_MODEL", "claude-haiku-4-5-20251001")
-    ANTHROPIC_MAX_TOKENS = int(os.getenv("ANTHROPIC_MAX_TOKENS", "4000"))
-    ANTHROPIC_TEMPERATURE = float(os.getenv("ANTHROPIC_TEMPERATURE", "0.4"))
-    ANTHROPIC_MAX_TOOL_ITERATIONS = int(os.getenv("ANTHROPIC_MAX_TOOL_ITERATIONS", "5"))
-    ANTHROPIC_RETRY_MAX_ATTEMPTS = int(os.getenv("ANTHROPIC_RETRY_MAX_ATTEMPTS", "3"))
-    ANTHROPIC_RETRY_BASE_DELAY_SECONDS = float(os.getenv("ANTHROPIC_RETRY_BASE_DELAY_SECONDS", "0.75"))
-    ANTHROPIC_RETRY_MAX_DELAY_SECONDS = float(os.getenv("ANTHROPIC_RETRY_MAX_DELAY_SECONDS", "4.0"))
+    NIM_API_KEY = os.getenv("NIM_API_KEY", os.getenv("ANTHROPIC_API_KEY", ""))
+    NIM_BASE_URL = os.getenv("NIM_BASE_URL", "https://integrate.api.nvidia.com/v1")
+    NIM_MODEL = os.getenv("NIM_MODEL", os.getenv("ANTHROPIC_MODEL", "openai/gpt-oss-120b"))
+    AI_MAX_TOKENS = int(os.getenv("AI_MAX_TOKENS", os.getenv("ANTHROPIC_MAX_TOKENS", "4000")))
+    AI_TEMPERATURE = float(os.getenv("AI_TEMPERATURE", os.getenv("ANTHROPIC_TEMPERATURE", "0.4")))
+    AI_MAX_TOOL_ITERATIONS = int(
+        os.getenv("AI_MAX_TOOL_ITERATIONS", os.getenv("ANTHROPIC_MAX_TOOL_ITERATIONS", "5"))
+    )
+    AI_RETRY_MAX_ATTEMPTS = int(
+        os.getenv("AI_RETRY_MAX_ATTEMPTS", os.getenv("ANTHROPIC_RETRY_MAX_ATTEMPTS", "3"))
+    )
+    AI_RETRY_BASE_DELAY_SECONDS = float(
+        os.getenv("AI_RETRY_BASE_DELAY_SECONDS", os.getenv("ANTHROPIC_RETRY_BASE_DELAY_SECONDS", "0.75"))
+    )
+    AI_RETRY_MAX_DELAY_SECONDS = float(
+        os.getenv("AI_RETRY_MAX_DELAY_SECONDS", os.getenv("ANTHROPIC_RETRY_MAX_DELAY_SECONDS", "4.0"))
+    )
+
+    # Backward-compatible aliases for existing call sites/tests.
+    ANTHROPIC_API_KEY = NIM_API_KEY
+    ANTHROPIC_MODEL = NIM_MODEL
+    ANTHROPIC_MAX_TOKENS = AI_MAX_TOKENS
+    ANTHROPIC_TEMPERATURE = AI_TEMPERATURE
+    ANTHROPIC_MAX_TOOL_ITERATIONS = AI_MAX_TOOL_ITERATIONS
+    ANTHROPIC_RETRY_MAX_ATTEMPTS = AI_RETRY_MAX_ATTEMPTS
+    ANTHROPIC_RETRY_BASE_DELAY_SECONDS = AI_RETRY_BASE_DELAY_SECONDS
+    ANTHROPIC_RETRY_MAX_DELAY_SECONDS = AI_RETRY_MAX_DELAY_SECONDS
     WEB_SEARCH_API_URL = os.getenv("WEB_SEARCH_API_URL", "https://api.duckduckgo.com/")
     WEB_SEARCH_TIMEOUT_SECONDS = float(os.getenv("WEB_SEARCH_TIMEOUT_SECONDS", "8.0"))
     WEB_SEARCH_MAX_RESULTS = int(os.getenv("WEB_SEARCH_MAX_RESULTS", "5"))
