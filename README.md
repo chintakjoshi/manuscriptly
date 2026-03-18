@@ -1,4 +1,4 @@
-# manuscriptly-the-writer
+# manuscriptly-the-writer [![CI](https://github.com/chintakjoshi/manuscriptly/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/chintakjoshi/manuscriptly/actions/workflows/ci.yml)
 
 Local-first prototype for an agentic blog writing workspace.
 
